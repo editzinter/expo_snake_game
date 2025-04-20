@@ -12,7 +12,7 @@ import SoundControl from "./SoundControl";
 import { GameEventType } from '@/lib/game/engine';
 import { gameStatsClient, GameStats, testDatabaseConnection, displayStats } from "@/lib/game/stats-client";
 import { createBrowserClient } from "@supabase/ssr";
-import { Users } from "lucide-react";
+import { Users, Trophy, ChevronRight, Clock, Target } from "lucide-react";
 import Leaderboard from './Leaderboard';
 import ChatBox from './ChatBox';
 
@@ -55,6 +55,8 @@ const GameCanvas = ({
   const [playerCount, setPlayerCount] = useState(0);
   const [killFeed, setKillFeed] = useState<{message: string, timestamp: number, isError?: boolean, animateClass?: string}[]>([]);
   const [isPointerLocked, setIsPointerLocked] = useState(false);
+  const [showDeathStats, setShowDeathStats] = useState(false);
+  const [deathStats, setDeathStats] = useState<GameStats | null>(null);
   
   // Update canvas size on window resize - use the entire viewport
   useEffect(() => {
@@ -357,61 +359,36 @@ const GameCanvas = ({
     };
   }, [zoom, gameRenderer]);
 
-  // Handle mouse lock for better control
-  const requestPointerLock = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    if (!isPointerLocked) {
-      canvas.requestPointerLock = canvas.requestPointerLock || 
-                               (canvas as any).mozRequestPointerLock || 
-                               (canvas as any).webkitRequestPointerLock;
-      
-      canvas.requestPointerLock();
-    }
-  }, [isPointerLocked]);
-  
-  // Update pointer lock state based on document state
-  useEffect(() => {
-    const handlePointerLockChange = () => {
-      setIsPointerLocked(
-        document.pointerLockElement === canvasRef.current ||
-        (document as any).mozPointerLockElement === canvasRef.current ||
-        (document as any).webkitPointerLockElement === canvasRef.current
-      );
-    };
-    
-    document.addEventListener('pointerlockchange', handlePointerLockChange);
-    document.addEventListener('mozpointerlockchange', handlePointerLockChange);
-    document.addEventListener('webkitpointerlockchange', handlePointerLockChange);
-    
-    return () => {
-      document.removeEventListener('pointerlockchange', handlePointerLockChange);
-      document.removeEventListener('mozpointerlockchange', handlePointerLockChange);
-      document.removeEventListener('webkitpointerlockchange', handlePointerLockChange);
-    };
-  }, []);
-  
-  // Unlock pointer when player dies
-  const unlockPointer = useCallback(() => {
-    if (document.exitPointerLock) {
-      document.exitPointerLock();
-    } else if ((document as any).mozExitPointerLock) {
-      (document as any).mozExitPointerLock();
-    } else if ((document as any).webkitExitPointerLock) {
-      (document as any).webkitExitPointerLock();
-    }
-    setIsPointerLocked(false);
-  }, []);
-
-  // Handle mouse/touch controls
+  // Handle mouse/touch controls with pointer lock
   useEffect(() => {
     if (!isInitialized) return;
     if (!gameEngine && !isOnlineMode) return;
     if (!playerId) return;
 
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handlePointerLockChange = () => {
+      setIsPointerLocked(document.pointerLockElement === canvas);
+    };
+    
+    const requestPointerLock = () => {
+      // Only request pointer lock if the player is alive
+      let playerSnake: Snake | undefined;
+      
+      if (isOnlineMode && gameState) {
+        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
+      } else if (gameEngine) {
+        const state = gameEngine.getState();
+        playerSnake = state.snakes.find(snake => snake.id === playerId);
+      }
+      
+      if (playerSnake && playerSnake.alive && !isPointerLocked && !showDeathStats) {
+        canvas.requestPointerLock();
+      }
+    };
+
     const handleMouseMove = (e: MouseEvent) => {
-      const canvas = canvasRef.current;
       if (!canvas) return;
       
       // Show controls temporarily when mouse moves
@@ -422,50 +399,49 @@ const GameCanvas = ({
         setShowControls(false);
       }, 3000);
 
-      // Calculate mouse movement based on pointer lock status
-      let mouseX, mouseY;
+      // Get player snake
+      let playerSnake: Snake | undefined;
       
-      if (isPointerLocked) {
-        // When pointer is locked, use movement deltas
-        const state = isOnlineMode ? gameState : gameEngine?.getState();
-        const playerSnake = state?.snakes.find(snake => snake.id === playerId);
+      if (isOnlineMode && gameState) {
+        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
+      } else if (gameEngine) {
+        const state = gameEngine.getState();
+        playerSnake = state.snakes.find(snake => snake.id === playerId);
+      }
+      
+      if (!playerSnake || !playerSnake.alive) return;
+
+      // Using movement delta when pointer is locked for better control
+      if (document.pointerLockElement === canvas) {
+        const movementX = e.movementX;
+        const movementY = e.movementY;
         
-        if (playerSnake && playerSnake.alive) {
-          // Use movement deltas for direction when locked
-          const direction = {
-            x: e.movementX,
-            y: e.movementY,
+        // Adjust sensitivity - lower numbers make the snake more responsive
+        const sensitivity = 0.5;  
+        
+        const direction = {
+          x: movementX * sensitivity,
+          y: movementY * sensitivity
+        };
+
+        // Update player direction
+        if (isOnlineMode) {
+          // Send direction to server
+          gameSocketClient.sendInput(direction);
+        } else if (gameEngine) {
+          // Update local game engine
+          const input: PlayerInput = {
+            id: playerId,
+            direction,
           };
-          
-          // Send input based on game mode
-          if (isOnlineMode) {
-            gameSocketClient.sendInput(direction);
-          } else if (gameEngine) {
-            const input: PlayerInput = {
-              id: playerId,
-              direction,
-            };
-            gameEngine.handlePlayerInput(input);
-          }
+          gameEngine.handlePlayerInput(input);
         }
       } else {
-        // Get mouse position relative to canvas when not locked
+        // Fallback to old method when pointer lock is not active
         const rect = canvas.getBoundingClientRect();
-        mouseX = e.clientX - rect.left;
-        mouseY = e.clientY - rect.top;
-
-        // Get player snake
-        let playerSnake: Snake | undefined;
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
         
-        if (isOnlineMode && gameState) {
-          playerSnake = gameState.snakes.find(snake => snake.id === playerId);
-        } else if (gameEngine) {
-          const state = gameEngine.getState();
-          playerSnake = state.snakes.find(snake => snake.id === playerId);
-        }
-        
-        if (!playerSnake || !playerSnake.alive) return;
-
         // Calculate direction from snake head to mouse position
         const direction = {
           x: mouseX - canvas.width / 2,
@@ -489,62 +465,17 @@ const GameCanvas = ({
       return () => clearTimeout(controlsTimer);
     };
 
-    const handleTouchMove = (e: TouchEvent) => {
-      e.preventDefault();
-      const canvas = canvasRef.current;
-      if (!canvas || e.touches.length === 0) return;
-      
-      // Show controls temporarily
-      setShowControls(true);
-      
-      // Get touch position
-      const rect = canvas.getBoundingClientRect();
-      const touchX = e.touches[0].clientX - rect.left;
-      const touchY = e.touches[0].clientY - rect.top;
-      
-      // Get player snake
-      let playerSnake: Snake | undefined;
-      
-      if (isOnlineMode && gameState) {
-        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
-      } else if (gameEngine) {
-        const state = gameEngine.getState();
-        playerSnake = state.snakes.find(snake => snake.id === playerId);
-      }
-      
-      if (!playerSnake || !playerSnake.alive) return;
-      
-      // Calculate direction from center to touch position
-      const direction = {
-        x: touchX - canvas.width / 2,
-        y: touchY - canvas.height / 2,
-      };
-      
-      // Update player direction
-      if (isOnlineMode) {
-        gameSocketClient.sendInput(direction);
-      } else if (gameEngine) {
-        const input: PlayerInput = {
-          id: playerId,
-          direction,
-        };
-        gameEngine.handlePlayerInput(input);
-      }
-    };
-
-    const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.addEventListener("mousemove", handleMouseMove);
-      canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
-    }
+    // Add event listeners
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("click", requestPointerLock);
+    document.addEventListener("pointerlockchange", handlePointerLockChange);
 
     return () => {
-      if (canvas) {
-        canvas.removeEventListener("mousemove", handleMouseMove);
-        canvas.removeEventListener("touchmove", handleTouchMove);
-      }
+      canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("click", requestPointerLock);
+      document.removeEventListener("pointerlockchange", handlePointerLockChange);
     };
-  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState, isPointerLocked]);
+  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState, isPointerLocked, showDeathStats]);
 
   // Store the start time in state and localStorage when game is initialized
   useEffect(() => {
@@ -556,81 +487,11 @@ const GameCanvas = ({
     }
   }, [isInitialized, gameStartTime]);
 
-  // Define handlePlayerDeath earlier
-  const handlePlayerDeath = () => {
-    if (!playerId || !gameStartTime) return;
-    
-    console.log("handlePlayerDeath called");
-    
-    // Unlock pointer when player dies
-    unlockPointer();
-    
-    // First, test database connection 
-    testDatabaseConnection().then(result => {
-      console.log("Database connection test before recording death stats:", result);
-    });
-    
-    // Get the player's final stats
-    let finalState;
-    let playerSnake;
-    
-    if (isOnlineMode && gameState) {
-      finalState = gameState;
-      playerSnake = finalState.snakes.find(s => s.id === playerId);
-    } else if (gameEngine) {
-      finalState = gameEngine.getState();
-      playerSnake = finalState.snakes.find(s => s.id === playerId);
-    }
-    
-    if (!playerSnake) {
-      console.error("Player snake not found!");
-      return;
-    }
-    
-    // Calculate play time in seconds
-    const playTimeSeconds = Math.floor((Date.now() - gameStartTime) / 1000);
-    
-    // Prepare stats object
-    const stats: GameStats = {
-      score: playerSnake.score,
-      snakeLength: playerSnake.segments.length,
-      position: finalState && finalState.leaderboard 
-        ? finalState.leaderboard.findIndex(entry => entry.id === playerId) + 1 
-        : undefined,
-      playTime: playTimeSeconds
-    };
-    
-    console.log("Recording death stats:", stats);
-    
-    // Record the stats
-    gameStatsClient.recordMatch(stats)
-      .then(() => {
-        console.log("Death stats recorded successfully");
-      })
-      .catch(err => {
-        console.error("Error recording death stats:", err);
-      });
-  };
-
-  // Game loop for local mode
+  // Main game loop for local mode
   useEffect(() => {
     // Skip if using online mode
     if (isOnlineMode) return;
     if (!isInitialized || !gameEngine || !gameRenderer || !playerId) return;
-    
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    // Add keyboard event listener for boost activation
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && playerId && gameEngine) {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        // Activate boost (this will check energy internally)
-        gameEngine.activateBoost(playerId);
-      }
-    };
     
     // Create a function to record game stats
     const recordGameStats = (snake: Snake) => {
@@ -653,14 +514,21 @@ const GameCanvas = ({
       const currentTime = Date.now();
       const playTimeSeconds = Math.floor((currentTime - effectiveStartTime) / 1000);
       
+      console.log("Play time calculation:", {
+        currentTime,
+        startTime: effectiveStartTime,
+        difference: currentTime - effectiveStartTime,
+        playTimeSeconds
+      });
+      
       // Record match stats
       const stats: GameStats = {
         score: snake.score,
         snakeLength: snake.segments.length,
         playTime: playTimeSeconds,
         isMultiplayer: forceOnlineMode || isOnlineMode,
-        kills: snake.kills || 0, 
-        position: gameEngine?.getPlayerRank(playerId) || undefined
+        kills: snake.kills || 0, // Track kills for multiplayer
+        position: gameEngine?.getPlayerRank(playerId || '') || undefined
       };
       
       console.log("Recording game stats:", JSON.stringify(stats));
@@ -669,15 +537,32 @@ const GameCanvas = ({
       gameStatsClient.recordMatch(stats)
         .then(() => {
           console.log("Stats recorded successfully");
+          // Clear gameStartTime from localStorage after successful recording
           localStorage.removeItem('gameStartTime');
+          // Force reset the game start time
           setGameStartTime(0);
         })
         .catch(err => {
           console.error("Error recording stats:", err);
         });
+      
+      // Check for achievements
+      if (snake.segments.length >= 50) {
+        gameStatsClient.unlockAchievement({
+          name: "Growing Pains",
+          description: "Reach length 50 or more"
+        }).catch(err => console.error("Error unlocking achievement:", err));
+      }
+      
+      if (playTimeSeconds >= 300) { // 5 minutes
+        gameStatsClient.unlockAchievement({
+          name: "Survivalist",
+          description: "Play for 5 minutes without dying"
+        }).catch(err => console.error("Error unlocking achievement:", err));
+      }
     };
-    
-    // Add event listeners for sound effects and game events
+
+    // Add event listeners for sound effects
     const handleGameEvent = (event: GameEventType, data?: any) => {
       if (data?.playerId !== playerId) return; // Only play sounds for the player's events
       
@@ -714,41 +599,95 @@ const GameCanvas = ({
           break;
         case 'playerKill':
           // Play kill sound
-          soundManager.playSound('special-food');
+          soundManager.playSound('special-food'); // Use existing sound for now
+          
+          // Track First Blood achievement
+          if (gameEngine) {
+            gameStatsClient.unlockAchievement({
+              name: "First Blood",
+              description: "Defeat your first opponent"
+            }).catch(err => console.error("Error unlocking achievement:", err));
+          }
           break;
         case 'boostStart':
           // Play boost activation sound
-          soundManager.playSound('special-food');
+          soundManager.playSound('special-food'); // Use an existing sound for now
+          
+          // Track boost usage for achievement
+          const boostCount = parseInt(localStorage.getItem('boostCount') || '0') + 1;
+          localStorage.setItem('boostCount', boostCount.toString());
+          
+          if (boostCount >= 50) {
+            gameStatsClient.unlockAchievement({
+              name: "Speed Demon",
+              description: "Use boost 50 times"
+            }).catch(err => console.error("Error unlocking achievement:", err));
+          }
           break;
         case 'boostEnd':
           // Play boost end sound
-          soundManager.playSound('special-food');
+          soundManager.playSound('special-food'); // Use an existing sound for now, but with lower volume
           break;
       }
       
       if (event === 'playerDeath' && data?.playerId === playerId) {
         handlePlayerDeath();
       }
+      
+      // Track boost usage for achievement
+      if (event === 'boostStart' && data?.playerId === playerId) {
+        // You could have a counter in localStorage or state
+        const boostCount = parseInt(localStorage.getItem('boostCount') || '0') + 1;
+        localStorage.setItem('boostCount', boostCount.toString());
+        
+        if (boostCount >= 50) {
+          gameStatsClient.unlockAchievement({
+            name: "Speed Demon",
+            description: "Use boost 50 times"
+          }).catch(err => console.error("Error unlocking achievement:", err));
+        }
+      }
     };
     
-    // Add event listener
-    canvas.addEventListener('keydown', handleKeyDown);
-    
-    // Add game event listener
     gameEngine.addEventListener(handleGameEvent);
     
-    // Frame rate limiting variables
+    // Add keyboard event listener for boost activation
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle spacebar key when the game canvas is focused
+      if (e.code === 'Space') {
+        e.preventDefault(); // Prevent default spacebar behavior (like scrolling)
+        e.stopPropagation(); // Stop event from bubbling up
+        
+        // Get the current player state to check if boost is available
+        const state = gameEngine.getState();
+        const playerSnake = state.snakes.find(snake => snake.id === playerId);
+        
+        if (playerSnake && playerSnake.alive && playerSnake.boostMeter >= 100 && !playerSnake.isBoosting) {
+          // Only activate boost if meter is full and not already boosting
+          gameEngine.activateBoost(playerId);
+        }
+      }
+    };
+    
+    // Use the canvas as the event target instead of window for more specific control
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.addEventListener('keydown', handleKeyDown);
+      // Make the canvas focusable
+      canvas.tabIndex = 1; 
+      // Focus the canvas on load
+      canvas.focus();
+    }
+    
     let lastTime = 0;
     let animationFrameId: number;
-    let frameCounter = 0;
-    const FRAME_SKIP = 1; // Render every other frame (adjust as needed for performance)
 
     const gameLoop = (timestamp: number) => {
       // Calculate delta time
       const deltaTime = lastTime > 0 ? timestamp - lastTime : 0;
       lastTime = timestamp;
 
-      // Update game state (always update physics)
+      // Update game state
       gameEngine.update(deltaTime);
       
       // Get the updated state
@@ -761,19 +700,14 @@ const GameCanvas = ({
         gameRenderer.setCameraPosition(head.x, head.y);
       }
       
-      // Only render every FRAME_SKIP frames for performance
-      frameCounter = (frameCounter + 1) % (FRAME_SKIP + 1);
-      if (frameCounter === 0) {
-        // Pass deltaTime to the renderer
-        gameRenderer.render(state, playerSnake, deltaTime);
-      }
+      // Pass deltaTime to the renderer
+      gameRenderer.render(state, playerSnake, deltaTime);
 
       // Request next frame
       animationFrameId = requestAnimationFrame(gameLoop);
     };
 
     // Start game loop
-    frameCounter = 0;
     animationFrameId = requestAnimationFrame(gameLoop);
 
     // Clean up
@@ -787,7 +721,7 @@ const GameCanvas = ({
         gameEngine.removePlayer(playerId);
       }
     };
-  }, [isInitialized, gameEngine, gameRenderer, playerId, isOnlineMode, gameStartTime, forceOnlineMode, handlePlayerDeath, unlockPointer]);
+  }, [isInitialized, gameEngine, gameRenderer, playerId, isOnlineMode]);
 
   // Rendering loop for online mode
   useEffect(() => {
@@ -801,8 +735,9 @@ const GameCanvas = ({
         e.preventDefault(); // Prevent default spacebar behavior
         e.stopPropagation(); // Stop event from bubbling up
         
-        // Activate boost in online mode
-        gameSocketClient.activateBoost();
+        // For online mode, we would send a message to the server
+        // This would be implemented when server-side boost is supported
+        // For now, we can add a placeholder to show it's being captured
         console.log('Boost activation requested in online mode');
       }
     };
@@ -819,15 +754,13 @@ const GameCanvas = ({
     
     let animationFrameId: number;
     let lastTime = 0;
-    let frameCounter = 0;
-    const FRAME_SKIP = 1; // Render every other frame (adjust as needed for performance)
 
     const renderLoop = (timestamp: number) => {
       // Calculate delta time
       const deltaTime = lastTime > 0 ? timestamp - lastTime : 0;
       lastTime = timestamp;
       
-      // Find player snake
+      // Render the game state received from the server
       const playerSnake = gameState.snakes.find(snake => snake.id === playerId);
       
       // Center the view on the player's snake
@@ -836,19 +769,14 @@ const GameCanvas = ({
         gameRenderer.setCameraPosition(head.x, head.y);
       }
       
-      // Only render every FRAME_SKIP frames for performance
-      frameCounter = (frameCounter + 1) % (FRAME_SKIP + 1);
-      if (frameCounter === 0) {
-        // Pass deltaTime to the renderer for particle animations
-        gameRenderer.render(gameState, playerSnake, deltaTime);
-      }
+      // Pass deltaTime to the renderer for particle animations
+      gameRenderer.render(gameState, playerSnake, deltaTime);
 
       // Request next frame
       animationFrameId = requestAnimationFrame(renderLoop);
     };
 
     // Start render loop
-    frameCounter = 0;
     animationFrameId = requestAnimationFrame(renderLoop);
 
     // Clean up
@@ -861,37 +789,54 @@ const GameCanvas = ({
   }, [gameRenderer, gameState, playerId, isOnlineMode]);
 
   // Handle restart on click when game over
-  const handleClick = () => {
+  useEffect(() => {
     if (!isInitialized) return;
-    
-    // Request pointer lock on click
-    requestPointerLock();
-    
-    let playerSnake: Snake | undefined;
-    
-    if (isOnlineMode && gameState) {
-      playerSnake = gameState.snakes.find(snake => snake.id === playerId);
-    } else if (gameEngine) {
-      const state = gameEngine.getState();
-      playerSnake = state.snakes.find(snake => snake.id === playerId);
-    }
-    
-    if (playerSnake && !playerSnake.alive) {
-      if (isOnlineMode) {
-        // For online mode, rejoin the game
-        gameSocketClient.disconnect();
-        setTimeout(() => {
-          gameSocketClient.connect();
-          gameSocketClient.joinGame(playerName);
-        }, 500);
-      } else if (gameEngine && playerId) {
-        // For local mode, create a new player
-        gameEngine.removePlayer(playerId);
-        const newId = gameEngine.addPlayer(playerName);
-        setPlayerId(newId);
+    if (isOnlineMode && !gameState) return;
+    if (!isOnlineMode && !gameEngine) return;
+    if (!playerId) return;
+
+    const handleClick = () => {
+      let playerSnake: Snake | undefined;
+      
+      if (isOnlineMode && gameState) {
+        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
+      } else if (gameEngine) {
+        const state = gameEngine.getState();
+        playerSnake = state.snakes.find(snake => snake.id === playerId);
       }
+      
+      if (playerSnake && !playerSnake.alive) {
+        // Hide death stats UI when restarting
+        setShowDeathStats(false);
+        setDeathStats(null);
+        
+        if (isOnlineMode) {
+          // For online mode, rejoin the game
+          gameSocketClient.disconnect();
+          setTimeout(() => {
+            gameSocketClient.connect();
+            gameSocketClient.joinGame(playerName);
+          }, 500);
+        } else if (gameEngine) {
+          // For local mode, create a new player
+          gameEngine.removePlayer(playerId);
+          const newId = gameEngine.addPlayer(playerName);
+          setPlayerId(newId);
+        }
+      }
+    };
+
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.addEventListener("click", handleClick);
     }
-  };
+
+    return () => {
+      if (canvas) {
+        canvas.removeEventListener("click", handleClick);
+      }
+    };
+  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState, playerName]);
 
   // Handle zoom in/out buttons
   const handleZoomIn = () => {
@@ -911,10 +856,88 @@ const GameCanvas = ({
   // When a game starts
   useEffect(() => {
     if (playerId && gameEngine) {
-      const startTime = Date.now();
-      setGameStartTime(startTime);
+      setGameStartTime(Date.now());
     }
   }, [playerId, gameEngine]);
+
+  // Release pointer lock when player dies and show death stats
+  const handlePlayerDeath = () => {
+    if (!playerId || !gameStartTime) return;
+    
+    console.log("handlePlayerDeath called");
+    
+    // Release pointer lock if active
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
+    
+    // First, test database connection 
+    testDatabaseConnection().then(result => {
+      console.log("Database connection test before recording death stats:", result);
+    });
+    
+    // Get the player's final stats
+    let finalState;
+    let playerSnake;
+    
+    if (isOnlineMode && gameState) {
+      finalState = gameState;
+      playerSnake = finalState.snakes.find(s => s.id === playerId);
+    } else if (gameEngine) {
+      finalState = gameEngine.getState();
+      playerSnake = finalState.snakes.find(s => s.id === playerId);
+    }
+    
+    if (!playerSnake) {
+      console.error("Player snake not found!");
+      return;
+    }
+    
+    // Calculate play time in seconds
+    const playTimeSeconds = Math.floor((Date.now() - gameStartTime) / 1000);
+    
+    // Prepare stats object
+    const stats: GameStats = {
+      score: playerSnake.score,
+      snakeLength: playerSnake.segments.length,
+      position: finalState && finalState.leaderboard 
+        ? finalState.leaderboard.findIndex(entry => entry.id === playerId) + 1 
+        : undefined,
+      playTime: playTimeSeconds,
+      kills: playerSnake.kills || 0
+    };
+    
+    // Set death stats to display
+    setDeathStats(stats);
+    setShowDeathStats(true);
+    
+    console.log("Recording death stats:", stats);
+    
+    // Check authentication status
+    const checkAuth = async () => {
+      try {
+        const supabase = createBrowserClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        );
+        const { data: { user } } = await supabase.auth.getUser();
+        console.log("Auth check in handlePlayerDeath - user:", user);
+      } catch (err) {
+        console.error("Auth check error:", err);
+      }
+    };
+    
+    checkAuth();
+    
+    // Record the stats
+    gameStatsClient.recordMatch(stats)
+      .then(() => {
+        console.log("Death stats recorded successfully");
+      })
+      .catch(err => {
+        console.error("Error recording death stats:", err);
+      });
+  };
 
   // Function to test database connection
   const handleTestConnection = async () => {
@@ -1099,19 +1122,64 @@ const GameCanvas = ({
       <canvas
         ref={canvasRef}
         className="absolute inset-0 bg-zinc-900 dark:bg-zinc-950 w-full h-full"
-        style={{ cursor: isPointerLocked ? 'none' : 'crosshair' }}
-        onClick={handleClick}
+        style={{ cursor: isPointerLocked ? 'none' : 'default' }}
       />
 
-      {/* Pointer lock indicator */}
-      {!isPointerLocked && isInitialized && (
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/70 text-white px-4 py-2 rounded-lg z-50 pointer-events-none">
-          Click to lock mouse and control better
+      {/* Death Stats UI */}
+      {showDeathStats && deathStats && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
+            <h2 className="text-2xl font-bold text-center text-red-500 mb-2">Game Over</h2>
+            
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <div className="flex flex-col items-center bg-zinc-800 rounded-lg p-4">
+                <Trophy className="text-yellow-500 mb-2" size={28} />
+                <span className="text-lg font-medium text-white">{deathStats.score}</span>
+                <span className="text-sm text-zinc-400">Score</span>
+              </div>
+              
+              <div className="flex flex-col items-center bg-zinc-800 rounded-lg p-4">
+                <ChevronRight className="text-blue-500 mb-2" size={28} />
+                <span className="text-lg font-medium text-white">{deathStats.snakeLength}</span>
+                <span className="text-sm text-zinc-400">Length</span>
+              </div>
+              
+              <div className="flex flex-col items-center bg-zinc-800 rounded-lg p-4">
+                <Clock className="text-green-500 mb-2" size={28} />
+                <span className="text-lg font-medium text-white">
+                  {Math.floor(deathStats.playTime! / 60)}:{(deathStats.playTime! % 60).toString().padStart(2, '0')}
+                </span>
+                <span className="text-sm text-zinc-400">Play Time</span>
+              </div>
+              
+              <div className="flex flex-col items-center bg-zinc-800 rounded-lg p-4">
+                <Target className="text-red-500 mb-2" size={28} />
+                <span className="text-lg font-medium text-white">{deathStats.kills || 0}</span>
+                <span className="text-sm text-zinc-400">Kills</span>
+              </div>
+            </div>
+            
+            {deathStats.position && (
+              <div className="mt-4 bg-indigo-900/50 rounded-lg p-4 text-center">
+                <span className="text-sm text-indigo-200">Your Position: </span>
+                <span className="text-lg font-bold text-white">#{deathStats.position}</span>
+              </div>
+            )}
+            
+            <div className="mt-6 text-center">
+              <button 
+                onClick={() => setShowDeathStats(false)}
+                className="bg-red-600 hover:bg-red-700 transition-colors text-white font-medium px-6 py-2 rounded-full"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
       {/* Multiplayer components - only show when in multiplayer mode */}
-      {(isOnlineMode || forceOnlineMode) && (
+      {(isOnlineMode || forceOnlineMode) && !showDeathStats && (
         <>
           {/* Player count display */}
           <div className="absolute top-4 right-4 p-2 bg-black/70 rounded-lg text-white flex items-center gap-2 z-10">
@@ -1178,12 +1246,13 @@ const GameCanvas = ({
       )}
       
       {/* Show game controls helper */}
-      {showControls && (
+      {showControls && !showDeathStats && (
         <div className="absolute bottom-4 left-4 px-4 py-3 rounded-lg bg-black/50 backdrop-blur-sm transition-opacity duration-300">
           <div className="text-xs text-white">
             <p className="font-semibold mb-1">Controls:</p>
             <ul className="text-gray-300 space-y-1">
               <li>• Mouse: Move snake</li>
+              <li>• Click: Lock pointer for better control</li>
               <li>• Scroll: Zoom in/out</li>
               <li>• Space: Activate boost (when meter is full)</li>
               <li>• Click: Restart (when dead)</li>
