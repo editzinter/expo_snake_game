@@ -12,9 +12,10 @@ import SoundControl from "./SoundControl";
 import { GameEventType } from '@/lib/game/engine';
 import { gameStatsClient, GameStats, testDatabaseConnection, displayStats } from "@/lib/game/stats-client";
 import { createBrowserClient } from "@supabase/ssr";
-import { Users, Trophy, ChevronRight, Clock, Target } from "lucide-react";
+import { Users } from "lucide-react";
 import Leaderboard from './Leaderboard';
 import ChatBox from './ChatBox';
+import PointerLockManager, { usePointerLock } from './PointerLockManager';
 
 interface GameCanvasProps {
   width?: number;
@@ -34,6 +35,7 @@ const GameCanvas = ({
   forceOnlineMode = false
 }: GameCanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { theme } = useTheme();
   const [isInitialized, setIsInitialized] = useState(false);
   const [gameEngine, setGameEngine] = useState<GameEngine | null>(null);
@@ -54,9 +56,17 @@ const GameCanvas = ({
   const [showChat, setShowChat] = useState(false);
   const [playerCount, setPlayerCount] = useState(0);
   const [killFeed, setKillFeed] = useState<{message: string, timestamp: number, isError?: boolean, animateClass?: string}[]>([]);
-  const [isPointerLocked, setIsPointerLocked] = useState(false);
-  const [showDeathStats, setShowDeathStats] = useState(false);
-  const [deathStats, setDeathStats] = useState<GameStats | null>(null);
+  const [isGameOver, setIsGameOver] = useState(false);
+  const [finalStats, setFinalStats] = useState<{
+    score: number,
+    kills?: number,
+    position?: number,
+    playTime?: number,
+    snakeLength?: number
+  } | null>(null);
+  
+  // Use the pointer lock hook
+  const { isLocked: isPointerLocked, exitLock: exitPointerLock } = usePointerLock();
   
   // Update canvas size on window resize - use the entire viewport
   useEffect(() => {
@@ -187,7 +197,144 @@ const GameCanvas = ({
       
       clearTimeout(controlsTimer);
     };
-  }, [playerName, forceOnlineMode]);
+  }, [playerName, forceOnlineMode, theme]);
+
+  // Handle mouse/touch controls with improved pointer lock support
+  useEffect(() => {
+    if (!isInitialized) return;
+    if (!canvasRef.current || !playerId) return;
+    
+    const canvas = canvasRef.current;
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isGameOver) return;
+      
+      // Show controls temporarily when mouse moves
+      setShowControls(true);
+      
+      // Clear previous timeout if it exists
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+      
+      // Set new timeout
+      controlsTimeoutRef.current = setTimeout(() => {
+        setShowControls(false);
+      }, 3000);
+      
+      // Get player snake
+      let playerSnake: Snake | undefined;
+      
+      if (isOnlineMode && gameState) {
+        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
+      } else if (gameEngine) {
+        const state = gameEngine.getState();
+        playerSnake = state.snakes.find(snake => snake.id === playerId);
+      }
+      
+      if (!playerSnake || !playerSnake.alive) return;
+      
+      // Get canvas rect
+      const rect = canvas.getBoundingClientRect();
+      
+      // Calculate direction based on pointer lock mode
+      let direction;
+      
+      if (isPointerLocked) {
+        // Use movementX and movementY for pointer lock mode (more precise control)
+        direction = {
+          x: e.movementX,
+          y: e.movementY
+        };
+      } else {
+        // Get mouse position relative to canvas
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        
+        // Calculate direction from snake head to mouse position
+        direction = {
+          x: mouseX - canvas.width / 2,
+          y: mouseY - canvas.height / 2,
+        };
+      }
+      
+      // Normalize direction for consistent movement speed
+      const magnitude = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
+      if (magnitude > 0) {
+        direction.x /= magnitude;
+        direction.y /= magnitude;
+        
+        // Update player direction
+        if (isOnlineMode) {
+          // Send direction to server
+          gameSocketClient.sendInput(direction);
+        } else if (gameEngine) {
+          // Update local game engine
+          const input: PlayerInput = {
+            id: playerId,
+            direction,
+          };
+          gameEngine.handlePlayerInput(input);
+        }
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      const canvas = canvasRef.current;
+      if (!canvas || e.touches.length === 0) return;
+      
+      // Show controls temporarily
+      setShowControls(true);
+      
+      // Get touch position
+      const rect = canvas.getBoundingClientRect();
+      const touchX = e.touches[0].clientX - rect.left;
+      const touchY = e.touches[0].clientY - rect.top;
+      
+      // Get player snake
+      let playerSnake: Snake | undefined;
+      
+      if (isOnlineMode && gameState) {
+        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
+      } else if (gameEngine) {
+        const state = gameEngine.getState();
+        playerSnake = state.snakes.find(snake => snake.id === playerId);
+      }
+      
+      if (!playerSnake || !playerSnake.alive) return;
+      
+      // Calculate direction from center to touch position
+      const direction = {
+        x: touchX - canvas.width / 2,
+        y: touchY - canvas.height / 2,
+      };
+      
+      // Update player direction
+      if (isOnlineMode) {
+        gameSocketClient.sendInput(direction);
+      } else if (gameEngine) {
+        const input: PlayerInput = {
+          id: playerId,
+          direction,
+        };
+        gameEngine.handlePlayerInput(input);
+      }
+    };
+
+    // Add event listeners
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
+    
+    // Clean up event listeners
+    return () => {
+      canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("touchmove", handleTouchMove);
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
+  }, [isInitialized, playerId, isOnlineMode, gameEngine, gameState, isPointerLocked, isGameOver]);
 
   // Update canvas size when window resizes
   useEffect(() => {
@@ -358,124 +505,6 @@ const GameCanvas = ({
       }
     };
   }, [zoom, gameRenderer]);
-
-  // Handle mouse/touch controls with pointer lock
-  useEffect(() => {
-    if (!isInitialized) return;
-    if (!gameEngine && !isOnlineMode) return;
-    if (!playerId) return;
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const handlePointerLockChange = () => {
-      setIsPointerLocked(document.pointerLockElement === canvas);
-    };
-    
-    const requestPointerLock = () => {
-      // Only request pointer lock if the player is alive
-      let playerSnake: Snake | undefined;
-      
-      if (isOnlineMode && gameState) {
-        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
-      } else if (gameEngine) {
-        const state = gameEngine.getState();
-        playerSnake = state.snakes.find(snake => snake.id === playerId);
-      }
-      
-      if (playerSnake && playerSnake.alive && !isPointerLocked && !showDeathStats) {
-        canvas.requestPointerLock();
-      }
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!canvas) return;
-      
-      // Show controls temporarily when mouse moves
-      setShowControls(true);
-      
-      // Hide controls after 3 seconds
-      const controlsTimer = setTimeout(() => {
-        setShowControls(false);
-      }, 3000);
-
-      // Get player snake
-      let playerSnake: Snake | undefined;
-      
-      if (isOnlineMode && gameState) {
-        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
-      } else if (gameEngine) {
-        const state = gameEngine.getState();
-        playerSnake = state.snakes.find(snake => snake.id === playerId);
-      }
-      
-      if (!playerSnake || !playerSnake.alive) return;
-
-      // Using movement delta when pointer is locked for better control
-      if (document.pointerLockElement === canvas) {
-        const movementX = e.movementX;
-        const movementY = e.movementY;
-        
-        // Adjust sensitivity - lower numbers make the snake more responsive
-        const sensitivity = 0.5;  
-        
-        const direction = {
-          x: movementX * sensitivity,
-          y: movementY * sensitivity
-        };
-
-        // Update player direction
-        if (isOnlineMode) {
-          // Send direction to server
-          gameSocketClient.sendInput(direction);
-        } else if (gameEngine) {
-          // Update local game engine
-          const input: PlayerInput = {
-            id: playerId,
-            direction,
-          };
-          gameEngine.handlePlayerInput(input);
-        }
-      } else {
-        // Fallback to old method when pointer lock is not active
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-        
-        // Calculate direction from snake head to mouse position
-        const direction = {
-          x: mouseX - canvas.width / 2,
-          y: mouseY - canvas.height / 2,
-        };
-
-        // Update player direction
-        if (isOnlineMode) {
-          // Send direction to server
-          gameSocketClient.sendInput(direction);
-        } else if (gameEngine) {
-          // Update local game engine
-          const input: PlayerInput = {
-            id: playerId,
-            direction,
-          };
-          gameEngine.handlePlayerInput(input);
-        }
-      }
-      
-      return () => clearTimeout(controlsTimer);
-    };
-
-    // Add event listeners
-    canvas.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("click", requestPointerLock);
-    document.addEventListener("pointerlockchange", handlePointerLockChange);
-
-    return () => {
-      canvas.removeEventListener("mousemove", handleMouseMove);
-      canvas.removeEventListener("click", requestPointerLock);
-      document.removeEventListener("pointerlockchange", handlePointerLockChange);
-    };
-  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState, isPointerLocked, showDeathStats]);
 
   // Store the start time in state and localStorage when game is initialized
   useEffect(() => {
@@ -681,27 +710,14 @@ const GameCanvas = ({
     
     let lastTime = 0;
     let animationFrameId: number;
-    
-    // Performance optimization settings
-    const PHYSICS_STEP = 1000 / 60; // Fixed time step for physics (60 FPS)
-    let physicsAccumulator = 0;
 
     const gameLoop = (timestamp: number) => {
       // Calculate delta time
       const deltaTime = lastTime > 0 ? timestamp - lastTime : 0;
       lastTime = timestamp;
-      
-      // Cap delta time to prevent huge jumps after tab switches/sleep
-      const cappedDeltaTime = Math.min(deltaTime, 100);
-      
-      // Update physics with fixed time step for consistent simulation
-      physicsAccumulator += cappedDeltaTime;
-      
-      // Process multiple physics updates if needed to catch up
-      while (physicsAccumulator >= PHYSICS_STEP) {
-        gameEngine.update(PHYSICS_STEP);
-        physicsAccumulator -= PHYSICS_STEP;
-      }
+
+      // Update game state
+      gameEngine.update(deltaTime);
       
       // Get the updated state
       const state = gameEngine.getState();
@@ -713,10 +729,9 @@ const GameCanvas = ({
         gameRenderer.setCameraPosition(head.x, head.y);
       }
       
-      // Pass the real delta time to the renderer for smooth animations
-      gameRenderer.updateEffects(cappedDeltaTime);
-      gameRenderer.render(state, playerSnake, cappedDeltaTime);
-      
+      // Pass deltaTime to the renderer
+      gameRenderer.render(state, playerSnake, deltaTime);
+
       // Request next frame
       animationFrameId = requestAnimationFrame(gameLoop);
     };
@@ -820,10 +835,6 @@ const GameCanvas = ({
       }
       
       if (playerSnake && !playerSnake.alive) {
-        // Hide death stats UI when restarting
-        setShowDeathStats(false);
-        setDeathStats(null);
-        
         if (isOnlineMode) {
           // For online mode, rejoin the game
           gameSocketClient.disconnect();
@@ -837,9 +848,6 @@ const GameCanvas = ({
           const newId = gameEngine.addPlayer(playerName);
           setPlayerId(newId);
         }
-      } else if (playerSnake && playerSnake.alive && !isPointerLocked) {
-        // If the game is active and the player is alive, lock the pointer
-        lockPointer();
       }
     };
 
@@ -853,7 +861,7 @@ const GameCanvas = ({
         canvas.removeEventListener("click", handleClick);
       }
     };
-  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState, playerName, isPointerLocked]);
+  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState, playerName]);
 
   // Handle zoom in/out buttons
   const handleZoomIn = () => {
@@ -877,68 +885,80 @@ const GameCanvas = ({
     }
   }, [playerId, gameEngine]);
 
-  // Release pointer lock when player dies and show death stats
+  // Handle player death event with improved cleanup and UI
   const handlePlayerDeath = () => {
     if (!playerId || !gameStartTime) return;
     
     console.log("handlePlayerDeath called");
     
-    // Release pointer lock if active
-    unlockPointer();
+    // Exit pointer lock when player dies
+    exitPointerLock();
     
-    // Calculate play time in seconds
-    const playTimeSeconds = Math.floor((Date.now() - gameStartTime) / 1000);
+    // Set game over state
+    setIsGameOver(true);
     
-    // *** Add this guard against instant death bug ***
-    // Ignore death events that happen too quickly after spawning (likely due to spawn location issues)
-    if (playTimeSeconds < 1) {
-      console.log("Ignoring death event that occurred too quickly after spawn", playTimeSeconds);
-      
-      // Reset the player if we're in offline mode
-      if (!isOnlineMode && gameEngine) {
-        // Create a new player to replace the one that died too quickly
-        gameEngine.removePlayer(playerId);
-        const newId = gameEngine.addPlayer(playerName);
-        setPlayerId(newId);
-        
-        // Don't show death stats or record the death
-        return;
-      }
-    }
+    // First, test database connection 
+    testDatabaseConnection().then(result => {
+      console.log("Database connection test before recording death stats:", result);
+    });
     
     // Get the player's final stats
     let finalState;
-    let playerSnake;
+    let currentPlayerSnake;
     
     if (isOnlineMode && gameState) {
       finalState = gameState;
-      playerSnake = finalState.snakes.find(s => s.id === playerId);
+      currentPlayerSnake = finalState.snakes.find(s => s.id === playerId);
     } else if (gameEngine) {
       finalState = gameEngine.getState();
-      playerSnake = finalState.snakes.find(s => s.id === playerId);
+      currentPlayerSnake = finalState.snakes.find(s => s.id === playerId);
     }
     
-    if (!playerSnake) {
+    if (!currentPlayerSnake) {
       console.error("Player snake not found!");
       return;
     }
     
+    // Calculate play time in seconds
+    const playTimeSeconds = Math.floor((Date.now() - gameStartTime) / 1000);
+    
     // Prepare stats object
     const stats: GameStats = {
-      score: playerSnake.score,
-      snakeLength: playerSnake.segments.length,
+      score: currentPlayerSnake.score,
+      snakeLength: currentPlayerSnake.segments.length,
       position: finalState && finalState.leaderboard 
         ? finalState.leaderboard.findIndex(entry => entry.id === playerId) + 1 
         : undefined,
       playTime: playTimeSeconds,
-      kills: playerSnake.kills || 0
+      kills: currentPlayerSnake.kills || 0
     };
     
-    // Set death stats to display
-    setDeathStats(stats);
-    setShowDeathStats(true);
+    // Save final stats for display
+    setFinalStats({
+      score: currentPlayerSnake.score,
+      kills: currentPlayerSnake.kills || 0,
+      position: stats.position,
+      playTime: playTimeSeconds,
+      snakeLength: currentPlayerSnake.segments.length
+    });
     
     console.log("Recording death stats:", stats);
+    
+    // Check authentication status
+    const checkAuth = async () => {
+      try {
+        const supabase = createBrowserClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        );
+        const { data: { user } } = await supabase.auth.getUser();
+        console.log("Auth check in handlePlayerDeath - user:", user);
+      } catch (err) {
+        console.error("Auth check error:", err);
+      }
+    };
+    
+    checkAuth();
     
     // Record the stats
     gameStatsClient.recordMatch(stats)
@@ -948,6 +968,15 @@ const GameCanvas = ({
       .catch(err => {
         console.error("Error recording death stats:", err);
       });
+  };
+
+  // Function to restart the game after death
+  const handleRestartGame = () => {
+    setIsGameOver(false);
+    setFinalStats(null);
+    
+    // Reload the page to restart the game completely
+    window.location.reload();
   };
 
   // Function to test database connection
@@ -1128,268 +1157,218 @@ const GameCanvas = ({
     }
   }, [isOnlineMode, gameState]);
 
-  // Function to lock pointer
-  const lockPointer = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    canvas.requestPointerLock = canvas.requestPointerLock || 
-                              (canvas as any).mozRequestPointerLock ||
-                              (canvas as any).webkitRequestPointerLock;
-    canvas.requestPointerLock();
-  };
-  
-  // Function to unlock pointer
-  const unlockPointer = () => {
-    if (document.pointerLockElement) {
-      document.exitPointerLock = document.exitPointerLock || 
-                               (document as any).mozExitPointerLock ||
-                               (document as any).webkitExitPointerLock;
-      document.exitPointerLock();
-    }
-  };
-  
-  // Track pointer lock state
-  useEffect(() => {
-    const handlePointerLockChange = () => {
-      setIsPointerLocked(document.pointerLockElement === canvasRef.current);
-    };
-    
-    document.addEventListener('pointerlockchange', handlePointerLockChange);
-    document.addEventListener('mozpointerlockchange', handlePointerLockChange);
-    document.addEventListener('webkitpointerlockchange', handlePointerLockChange);
-    
-    return () => {
-      document.removeEventListener('pointerlockchange', handlePointerLockChange);
-      document.removeEventListener('mozpointerlockchange', handlePointerLockChange);
-      document.removeEventListener('webkitpointerlockchange', handlePointerLockChange);
-    };
-  }, []);
-
   return (
-    <div className="relative w-full h-full overflow-hidden">
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 bg-zinc-900 dark:bg-zinc-950 w-full h-full"
-        style={{ cursor: isPointerLocked ? 'none' : 'default' }}
-      />
+    <PointerLockManager disabled={isGameOver}>
+      <div className="relative w-full h-full overflow-hidden">
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 bg-zinc-900 dark:bg-zinc-950 w-full h-full"
+          style={{ cursor: isPointerLocked ? 'none' : 'default' }} // Only hide cursor when pointer is locked
+        />
 
-      {/* Death Stats UI */}
-      {showDeathStats && deathStats && (
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
-            <h2 className="text-2xl font-bold text-center text-red-500 mb-2">Game Over</h2>
-            
-            <div className="grid grid-cols-2 gap-4 mt-4">
-              <div className="flex flex-col items-center bg-zinc-800 rounded-lg p-4">
-                <Trophy className="text-yellow-500 mb-2" size={28} />
-                <span className="text-lg font-medium text-white">{deathStats.score}</span>
-                <span className="text-sm text-zinc-400">Score</span>
-              </div>
-              
-              <div className="flex flex-col items-center bg-zinc-800 rounded-lg p-4">
-                <ChevronRight className="text-blue-500 mb-2" size={28} />
-                <span className="text-lg font-medium text-white">{deathStats.snakeLength}</span>
-                <span className="text-sm text-zinc-400">Length</span>
-              </div>
-              
-              <div className="flex flex-col items-center bg-zinc-800 rounded-lg p-4">
-                <Clock className="text-green-500 mb-2" size={28} />
-                <span className="text-lg font-medium text-white">
-                  {Math.floor(deathStats.playTime! / 60)}:{(deathStats.playTime! % 60).toString().padStart(2, '0')}
-                </span>
-                <span className="text-sm text-zinc-400">Play Time</span>
-              </div>
-              
-              <div className="flex flex-col items-center bg-zinc-800 rounded-lg p-4">
-                <Target className="text-red-500 mb-2" size={28} />
-                <span className="text-lg font-medium text-white">{deathStats.kills || 0}</span>
-                <span className="text-sm text-zinc-400">Kills</span>
-              </div>
+        {/* Multiplayer components - only show when in multiplayer mode */}
+        {(isOnlineMode || forceOnlineMode) && (
+          <>
+            {/* Player count display */}
+            <div className="absolute top-4 right-4 p-2 bg-black/70 rounded-lg text-white flex items-center gap-2 z-10">
+              <Users size={16} />
+              <span>{playerCount}</span>
             </div>
             
-            {deathStats.position && (
-              <div className="mt-4 bg-indigo-900/50 rounded-lg p-4 text-center">
-                <span className="text-sm text-indigo-200">Your Position: </span>
-                <span className="text-lg font-bold text-white">#{deathStats.position}</span>
+            {/* Kill feed */}
+            <div className="absolute top-20 right-4 flex flex-col gap-2 z-10 max-w-[300px]">
+              {killFeed.map((item, index) => (
+                <div 
+                  key={item.timestamp + index} 
+                  className={`p-2 ${item.isError 
+                    ? 'bg-red-900/90 border border-red-500' 
+                    : 'bg-black/80'} text-white rounded-md ${item.animateClass || ''}`}
+                >
+                  {item.message}
+                  {item.isError && (
+                    <button 
+                      onClick={() => {
+                        setKillFeed(prev => prev.filter((_, i) => i !== index));
+                      }}
+                      className="ml-2 text-xs text-red-300 hover:text-white"
+                    >
+                      Dismiss
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            
+            {/* Leaderboard */}
+            <Leaderboard
+              playerCount={playerCount}
+            />
+            
+            {/* Toggle chat button */}
+            <button 
+              onClick={() => setShowChat(!showChat)}
+              className="absolute bottom-20 right-4 p-2 bg-black/70 text-white rounded-md z-10 hover:bg-black/90 transition-colors"
+            >
+              {showChat ? "Hide Chat" : "Show Chat"}
+            </button>
+            
+            {/* Chat box */}
+            {showChat && (
+              <ChatBox 
+                visible={showChat}
+                onClose={() => setShowChat(false)}
+              />
+            )}
+          </>
+        )}
+
+        {/* Multiplayer mode indicator */}
+        {forceOnlineMode && (
+          <div className="absolute top-20 left-0 right-0 flex justify-center pointer-events-none z-20">
+            <div className="bg-indigo-600 text-white px-4 py-2 rounded-full font-bold flex items-center gap-2 shadow-lg">
+              <Users size={16} />
+              Multiplayer Mode
+              {isConnecting && !isOnlineMode && " - Connecting..."}
+            </div>
+          </div>
+        )}
+        
+        {/* Show game controls helper */}
+        {showControls && !isGameOver && (
+          <div className="absolute bottom-4 left-4 px-4 py-3 rounded-lg bg-black/50 backdrop-blur-sm transition-opacity duration-300">
+            <div className="text-xs text-white">
+              <p className="font-semibold mb-1">Controls:</p>
+              <ul className="text-gray-300 space-y-1">
+                <li>• Mouse: Move snake {!isPointerLocked && "(Click game to lock mouse)"}</li>
+                <li>• Scroll: Zoom in/out</li>
+                <li>• Space: Activate boost (when meter is full)</li>
+                <li>• Click: Restart (when dead)</li>
+              </ul>
+            </div>
+          </div>
+        )}
+        
+        {/* Game Over Stats UI */}
+        {isGameOver && finalStats && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-20">
+            <div className="bg-slate-800 border-2 border-red-500 rounded-lg p-6 max-w-md w-full shadow-lg transform animate-in fade-in slide-in-from-bottom-4 duration-300">
+              <h2 className="text-3xl font-bold text-center text-red-500 mb-6">Game Over</h2>
+                
+              <div className="grid grid-cols-2 gap-6 mb-6">
+                <div className="bg-slate-900 p-4 rounded-lg text-center">
+                  <p className="text-gray-400 text-sm mb-1">Score</p>
+                  <p className="text-2xl font-bold text-white">{finalStats.score}</p>
+                </div>
+                  
+                <div className="bg-slate-900 p-4 rounded-lg text-center">
+                  <p className="text-gray-400 text-sm mb-1">Length</p>
+                  <p className="text-2xl font-bold text-white">{finalStats.snakeLength}</p>
+                </div>
+                  
+                <div className="bg-slate-900 p-4 rounded-lg text-center">
+                  <p className="text-gray-400 text-sm mb-1">Kills</p>
+                  <p className="text-2xl font-bold text-white">{finalStats.kills || 0}</p>
+                </div>
+                  
+                <div className="bg-slate-900 p-4 rounded-lg text-center">
+                  <p className="text-gray-400 text-sm mb-1">{finalStats.position ? "Rank" : "Play Time"}</p>
+                  <p className="text-2xl font-bold text-white">
+                    {finalStats.position ? `#${finalStats.position}` : `${Math.floor(finalStats.playTime! / 60)}:${(finalStats.playTime! % 60).toString().padStart(2, '0')}`}
+                  </p>
+                </div>
+              </div>
+                
+              <button 
+                onClick={handleRestartGame}
+                className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition-colors duration-200"
+              >
+                Play Again
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {/* Stats button - always visible */}
+        <button
+          onClick={handleShowStats}
+          className="absolute top-4 right-4 bg-indigo-900/70 hover:bg-indigo-800/80 text-white px-3 py-1 rounded text-sm font-medium"
+        >
+          View Stats
+        </button>
+        
+        {/* Debug buttons (press Shift+D to show) */}
+        {showDebug && (
+          <div className="absolute top-4 left-4 p-2 bg-black/70 backdrop-blur-sm rounded-md z-50">
+            <h3 className="text-white text-xs font-bold mb-2">Debug Tools</h3>
+            <div className="flex flex-col gap-2">
+              <button 
+                onClick={handleTestConnection}
+                className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+              >
+                Test DB Connection
+              </button>
+              <button 
+                onClick={toggleForceLocalStorage}
+                className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+              >
+                Toggle Force Local Storage
+              </button>
+              <button 
+                onClick={handleShowStats}
+                className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+              >
+                Show Stats
+              </button>
+            </div>
+            <div className="mt-2 text-xs text-gray-400">Press Shift+D to hide</div>
+          </div>
+        )}
+        
+        {/* Game status indicators */}
+        <div className={`absolute top-20 right-4 px-3 py-2 rounded-lg bg-black/50 backdrop-blur-sm text-xs font-medium transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+          <div className="flex flex-col gap-2">
+            {isConnecting ? (
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></div>
+                <span className="text-yellow-500">Connecting...</span>
+              </div>
+            ) : isOnlineMode ? (
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                <span className="text-green-500">Online Mode</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                <span className="text-blue-500">Local Mode</span>
               </div>
             )}
             
-            <div className="mt-6 text-center">
-              <button 
-                onClick={() => setShowDeathStats(false)}
-                className="bg-red-600 hover:bg-red-700 transition-colors text-white font-medium px-6 py-2 rounded-full"
-              >
-                Try Again
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Multiplayer components - only show when in multiplayer mode */}
-      {(isOnlineMode || forceOnlineMode) && !showDeathStats && (
-        <>
-          {/* Player count display */}
-          <div className="absolute top-4 right-4 p-2 bg-black/70 rounded-lg text-white flex items-center gap-2 z-10">
-            <Users size={16} />
-            <span>{playerCount}</span>
-          </div>
-          
-          {/* Kill feed */}
-          <div className="absolute top-20 right-4 flex flex-col gap-2 z-10 max-w-[300px]">
-            {killFeed.map((item, index) => (
-              <div 
-                key={item.timestamp + index} 
-                className={`p-2 ${item.isError 
-                  ? 'bg-red-900/90 border border-red-500' 
-                  : 'bg-black/80'} text-white rounded-md ${item.animateClass || ''}`}
-              >
-                {item.message}
-                {item.isError && (
-                  <button 
-                    onClick={() => {
-                      setKillFeed(prev => prev.filter((_, i) => i !== index));
-                    }}
-                    className="ml-2 text-xs text-red-300 hover:text-white"
-                  >
-                    Dismiss
-                  </button>
-                )}
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-white">Zoom: {Math.round(zoom * 100)}%</span>
+              
+              <div className="flex gap-2">
+                <button 
+                  onClick={handleZoomOut}
+                  className="w-6 h-6 flex items-center justify-center bg-gray-800 rounded hover:bg-gray-700"
+                >
+                  <span className="text-white">-</span>
+                </button>
+                <button 
+                  onClick={handleZoomIn}
+                  className="w-6 h-6 flex items-center justify-center bg-gray-800 rounded hover:bg-gray-700"
+                >
+                  <span className="text-white">+</span>
+                </button>
               </div>
-            ))}
-          </div>
-          
-          {/* Leaderboard */}
-          <Leaderboard
-            playerCount={playerCount}
-          />
-          
-          {/* Toggle chat button */}
-          <button 
-            onClick={() => setShowChat(!showChat)}
-            className="absolute bottom-20 right-4 p-2 bg-black/70 text-white rounded-md z-10 hover:bg-black/90 transition-colors"
-          >
-            {showChat ? "Hide Chat" : "Show Chat"}
-          </button>
-          
-          {/* Chat box */}
-          {showChat && (
-            <ChatBox 
-              visible={showChat}
-              onClose={() => setShowChat(false)}
-            />
-          )}
-        </>
-      )}
-
-      {/* Multiplayer mode indicator */}
-      {forceOnlineMode && (
-        <div className="absolute top-20 left-0 right-0 flex justify-center pointer-events-none z-20">
-          <div className="bg-indigo-600 text-white px-4 py-2 rounded-full font-bold flex items-center gap-2 shadow-lg">
-            <Users size={16} />
-            Multiplayer Mode
-            {isConnecting && !isOnlineMode && " - Connecting..."}
-          </div>
-        </div>
-      )}
-      
-      {/* Show game controls helper */}
-      {showControls && !showDeathStats && (
-        <div className="absolute bottom-4 left-4 px-4 py-3 rounded-lg bg-black/50 backdrop-blur-sm transition-opacity duration-300">
-          <div className="text-xs text-white">
-            <p className="font-semibold mb-1">Controls:</p>
-            <ul className="text-gray-300 space-y-1">
-              <li>• Mouse: Move snake</li>
-              <li>• Click: Lock pointer for better control</li>
-              <li>• Scroll: Zoom in/out</li>
-              <li>• Space: Activate boost (when meter is full)</li>
-              <li>• Click: Restart (when dead)</li>
-            </ul>
-          </div>
-        </div>
-      )}
-      
-      {/* Stats button - always visible */}
-      <button
-        onClick={handleShowStats}
-        className="absolute top-4 right-4 bg-indigo-900/70 hover:bg-indigo-800/80 text-white px-3 py-1 rounded text-sm font-medium"
-      >
-        View Stats
-      </button>
-      
-      {/* Debug buttons (press Shift+D to show) */}
-      {showDebug && (
-        <div className="absolute top-4 left-4 p-2 bg-black/70 backdrop-blur-sm rounded-md z-50">
-          <h3 className="text-white text-xs font-bold mb-2">Debug Tools</h3>
-          <div className="flex flex-col gap-2">
-            <button 
-              onClick={handleTestConnection}
-              className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-            >
-              Test DB Connection
-            </button>
-            <button 
-              onClick={toggleForceLocalStorage}
-              className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-            >
-              Toggle Force Local Storage
-            </button>
-            <button 
-              onClick={handleShowStats}
-              className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-            >
-              Show Stats
-            </button>
-          </div>
-          <div className="mt-2 text-xs text-gray-400">Press Shift+D to hide</div>
-        </div>
-      )}
-      
-      {/* Game status indicators */}
-      <div className={`absolute top-20 right-4 px-3 py-2 rounded-lg bg-black/50 backdrop-blur-sm text-xs font-medium transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
-        <div className="flex flex-col gap-2">
-          {isConnecting ? (
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></div>
-              <span className="text-yellow-500">Connecting...</span>
-            </div>
-          ) : isOnlineMode ? (
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-green-500"></div>
-              <span className="text-green-500">Online Mode</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-              <span className="text-blue-500">Local Mode</span>
-            </div>
-          )}
-          
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-white">Zoom: {Math.round(zoom * 100)}%</span>
-            
-            <div className="flex gap-2">
-              <button 
-                onClick={handleZoomOut}
-                className="w-6 h-6 flex items-center justify-center bg-gray-800 rounded hover:bg-gray-700"
-              >
-                <span className="text-white">-</span>
-              </button>
-              <button 
-                onClick={handleZoomIn}
-                className="w-6 h-6 flex items-center justify-center bg-gray-800 rounded hover:bg-gray-700"
-              >
-                <span className="text-white">+</span>
-              </button>
             </div>
           </div>
         </div>
+        
+        {/* Sound control */}
+        <SoundControl />
       </div>
-      
-      {/* Sound control */}
-      <SoundControl />
-    </div>
+    </PointerLockManager>
   );
 };
 
