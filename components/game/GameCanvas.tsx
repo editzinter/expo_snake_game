@@ -53,7 +53,7 @@ const GameCanvas = ({
   const [playerRank, setPlayerRank] = useState<number | undefined>(undefined);
   const [showChat, setShowChat] = useState(false);
   const [playerCount, setPlayerCount] = useState(0);
-  const [killFeed, setKillFeed] = useState<{message: string, timestamp: number, isError?: boolean}[]>([]);
+  const [killFeed, setKillFeed] = useState<{message: string, timestamp: number, isError?: boolean, animateClass?: string}[]>([]);
   
   // Update canvas size on window resize - use the entire viewport
   useEffect(() => {
@@ -286,8 +286,8 @@ const GameCanvas = ({
         message = `${data.victimName} was eliminated`;
       }
       
-      // Add the new kill message to the feed
-      setKillFeed(prev => [...prev, { message, timestamp: Date.now() }]);
+      // Add the new kill message to the feed with animation class
+      setKillFeed(prev => [...prev, { message, timestamp: Date.now(), animateClass: 'animate-fadeOut' }]);
       
       // Remove old messages after 6 seconds
       setTimeout(() => {
@@ -1063,8 +1063,8 @@ const GameCanvas = ({
           message = `${data.victimName} was eliminated`;
         }
         
-        // Add the new kill message to the feed
-        setKillFeed(prev => [...prev, { message, timestamp: Date.now() }]);
+        // Add the new kill message to the feed with animation class
+        setKillFeed(prev => [...prev, { message, timestamp: Date.now(), animateClass: 'animate-fadeOut' }]);
         
         // Remove old messages after 6 seconds
         setTimeout(() => {
@@ -1121,7 +1121,7 @@ const GameCanvas = ({
                 key={item.timestamp + index} 
                 className={`p-2 ${item.isError 
                   ? 'bg-red-900/90 border border-red-500' 
-                  : 'bg-black/80'} text-white rounded-md animate-fadeOut`}
+                  : 'bg-black/80'} text-white rounded-md ${item.animateClass || ''}`}
               >
                 {item.message}
                 {item.isError && (
