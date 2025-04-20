@@ -54,6 +54,8 @@ const GameCanvas = ({
   const [showChat, setShowChat] = useState(false);
   const [playerCount, setPlayerCount] = useState(0);
   const [killFeed, setKillFeed] = useState<{message: string, timestamp: number, isError?: boolean, animateClass?: string}[]>([]);
+  const [isMouseLocked, setIsMouseLocked] = useState(false);
+  const [showMouseLockPrompt, setShowMouseLockPrompt] = useState(true);
   
   // Update canvas size on window resize - use the entire viewport
   useEffect(() => {
@@ -356,6 +358,54 @@ const GameCanvas = ({
     };
   }, [zoom, gameRenderer]);
 
+  // Handle mouse lock and unlock
+  const requestPointerLock = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    try {
+      canvas.requestPointerLock();
+      setShowMouseLockPrompt(false);
+    } catch (error) {
+      console.error("Error requesting pointer lock:", error);
+      setKillFeed(prev => [
+        ...prev, 
+        { 
+          message: "⚠️ Unable to lock mouse. Click again to try.", 
+          timestamp: Date.now(),
+          isError: true
+        }
+      ]);
+    }
+  }, []);
+  
+  // Monitor pointer lock state
+  useEffect(() => {
+    const handlePointerLockChange = () => {
+      setIsMouseLocked(document.pointerLockElement === canvasRef.current);
+    };
+    
+    const handlePointerLockError = (e: Event) => {
+      console.error("Pointer lock error:", e);
+      setKillFeed(prev => [
+        ...prev, 
+        { 
+          message: "⚠️ Mouse lock failed. Some browsers may require permission.", 
+          timestamp: Date.now(),
+          isError: true
+        }
+      ]);
+    };
+    
+    document.addEventListener('pointerlockchange', handlePointerLockChange);
+    document.addEventListener('pointerlockerror', handlePointerLockError);
+    
+    return () => {
+      document.removeEventListener('pointerlockchange', handlePointerLockChange);
+      document.removeEventListener('pointerlockerror', handlePointerLockError);
+    };
+  }, []);
+
   // Handle mouse/touch controls
   useEffect(() => {
     if (!isInitialized) return;
@@ -375,9 +425,18 @@ const GameCanvas = ({
       }, 3000);
 
       // Get mouse position relative to canvas
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+      let mouseX, mouseY;
+      
+      if (isMouseLocked) {
+        // Use movement delta for smoother, more precise control when locked
+        mouseX = e.movementX;
+        mouseY = e.movementY;
+      } else {
+        // Use traditional position calculation when not locked
+        const rect = canvas.getBoundingClientRect();
+        mouseX = e.clientX - rect.left;
+        mouseY = e.clientY - rect.top;
+      }
 
       // Get player snake
       let playerSnake: Snake | undefined;
@@ -392,11 +451,23 @@ const GameCanvas = ({
       if (!playerSnake || !playerSnake.alive) return;
 
       // Calculate direction from snake head to mouse position
-      const head = playerSnake.segments[0];
-      const direction = {
-        x: mouseX - canvas.width / 2,
-        y: mouseY - canvas.height / 2,
-      };
+      let direction;
+      
+      if (isMouseLocked) {
+        // When locked, use movement delta for smoother control
+        // Scale the movement for better sensitivity
+        const movementScale = 2.0;
+        direction = {
+          x: e.movementX * movementScale,
+          y: e.movementY * movementScale,
+        };
+      } else {
+        // When not locked, use position relative to center
+        direction = {
+          x: mouseX - canvas.width / 2,
+          y: mouseY - canvas.height / 2,
+        };
+      }
 
       // Update player direction
       if (isOnlineMode) {
@@ -469,7 +540,7 @@ const GameCanvas = ({
         canvas.removeEventListener("touchmove", handleTouchMove);
       }
     };
-  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState]);
+  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState, isMouseLocked]);
 
   // Store the start time in state and localStorage when game is initialized
   useEffect(() => {
@@ -790,29 +861,15 @@ const GameCanvas = ({
     if (!playerId) return;
 
     const handleClick = () => {
-      let playerSnake: Snake | undefined;
-      
-      if (isOnlineMode && gameState) {
-        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
-      } else if (gameEngine) {
-        const state = gameEngine.getState();
-        playerSnake = state.snakes.find(snake => snake.id === playerId);
+      if (!isMouseLocked) {
+        requestPointerLock();
       }
       
-      if (playerSnake && !playerSnake.alive) {
-        if (isOnlineMode) {
-          // For online mode, rejoin the game
-          gameSocketClient.disconnect();
-          setTimeout(() => {
-            gameSocketClient.connect();
-            gameSocketClient.joinGame(playerName);
-          }, 500);
-        } else if (gameEngine) {
-          // For local mode, create a new player
-          gameEngine.removePlayer(playerId);
-          const newId = gameEngine.addPlayer(playerName);
-          setPlayerId(newId);
-        }
+      // Boost functionality can continue as before
+      if (isOnlineMode) {
+        gameSocketClient.activateBoost();
+      } else if (gameEngine && playerId) {
+        gameEngine.activateBoost(playerId);
       }
     };
 
@@ -826,7 +883,7 @@ const GameCanvas = ({
         canvas.removeEventListener("click", handleClick);
       }
     };
-  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState, playerName]);
+  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState, playerName, isMouseLocked, requestPointerLock]);
 
   // Handle zoom in/out buttons
   const handleZoomIn = () => {
@@ -945,7 +1002,7 @@ const GameCanvas = ({
     displayStats();
   };
 
-  // Add a hotkey to toggle debug mode
+  // Add a hotkey to toggle debug mode and handle ESC for pointer lock
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Shift + D to toggle debug mode
@@ -957,13 +1014,23 @@ const GameCanvas = ({
       if (e.key === 's' || e.key === 'S') {
         handleShowStats();
       }
+      
+      // ESC key to exit pointer lock
+      if (e.key === 'Escape' && isMouseLocked) {
+        document.exitPointerLock();
+      }
+      
+      // L key to request pointer lock
+      if (e.key === 'l' || e.key === 'L') {
+        requestPointerLock();
+      }
     };
     
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [isMouseLocked, requestPointerLock]);
 
   // For online mode (multiplayer)
   useEffect(() => {
@@ -1098,13 +1165,85 @@ const GameCanvas = ({
   }, [isOnlineMode, gameState]);
 
   return (
-    <div className="relative w-full h-full overflow-hidden">
+    <div className={`relative w-full h-full overflow-hidden bg-black ${isMouseLocked ? 'cursor-locked' : ''}`}>
+      
+      {/* Game canvas */}
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 bg-zinc-900 dark:bg-zinc-950 w-full h-full"
-        style={{ cursor: 'none' }} // Hide cursor in the game area
+        className="w-full h-full block"
+        onClick={() => {
+          if (!isMouseLocked) {
+            requestPointerLock();
+          } else if (gameEngine && playerId) {
+            gameEngine.activateBoost(playerId);
+          } else if (isOnlineMode) {
+            gameSocketClient.activateBoost();
+          }
+        }}
+        onContextMenu={(e) => e.preventDefault()}
       />
 
+      {/* Mouse lock prompt - show only initially or when unlocked */}
+      {showMouseLockPrompt && !isMouseLocked && (
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 
+                      bg-black/80 backdrop-blur-sm p-4 rounded-lg border border-gray-700
+                      text-white text-center z-20 max-w-sm animate-pulse">
+          <div className="mb-2 text-xl font-bold">Click to Lock Mouse</div>
+          <div className="text-gray-300 text-sm">
+            For smoother gameplay, click to lock your mouse cursor.
+            <br />
+            Press <kbd className="px-2 py-1 bg-gray-700 rounded mx-1">ESC</kbd> at any time to unlock.
+          </div>
+        </div>
+      )}
+      
+      {/* Mouse lock status indicator */}
+      {isMouseLocked && (
+        <div className="absolute top-4 right-4 bg-black/50 backdrop-blur-sm text-white 
+                      px-3 py-1.5 rounded-full border border-green-500/30 text-sm 
+                      flex items-center gap-2 z-20">
+          <div className="w-2 h-2 rounded-full bg-green-500"></div>
+          <span>Mouse Locked (ESC to unlock)</span>
+        </div>
+      )}
+
+      {/* Overlay for controls - show temporarily */}
+      {showControls && (
+        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 
+                       bg-black/50 backdrop-blur-sm text-white p-3 rounded-lg
+                       text-center text-sm z-10 fade-in">
+          <div className="font-bold mb-1">Controls</div>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+            <div className="text-right">Mouse</div>
+            <div className="text-left text-gray-300">Control direction</div>
+            <div className="text-right">Left Click</div>
+            <div className="text-left text-gray-300">Boost</div>
+            <div className="text-right">ESC</div>
+            <div className="text-left text-gray-300">Unlock mouse</div>
+            <div className="text-right">S</div>
+            <div className="text-left text-gray-300">View stats</div>
+          </div>
+        </div>
+      )}
+      
+      {/* Zoom controls */}
+      <div className="absolute top-4 right-4 px-3 py-2 rounded-lg bg-black/50 backdrop-blur-sm text-xs font-medium transition-opacity duration-300">
+        <div className="flex flex-col gap-2">
+          <button 
+            onClick={handleZoomOut}
+            className="w-6 h-6 flex items-center justify-center bg-gray-800 rounded hover:bg-gray-700"
+          >
+            <span className="text-white">-</span>
+          </button>
+          <button 
+            onClick={handleZoomIn}
+            className="w-6 h-6 flex items-center justify-center bg-gray-800 rounded hover:bg-gray-700"
+          >
+            <span className="text-white">+</span>
+          </button>
+        </div>
+      </div>
+      
       {/* Multiplayer components - only show when in multiplayer mode */}
       {(isOnlineMode || forceOnlineMode) && (
         <>
@@ -1172,21 +1311,6 @@ const GameCanvas = ({
         </div>
       )}
       
-      {/* Show game controls helper */}
-      {showControls && (
-        <div className="absolute bottom-4 left-4 px-4 py-3 rounded-lg bg-black/50 backdrop-blur-sm transition-opacity duration-300">
-          <div className="text-xs text-white">
-            <p className="font-semibold mb-1">Controls:</p>
-            <ul className="text-gray-300 space-y-1">
-              <li>• Mouse: Move snake</li>
-              <li>• Scroll: Zoom in/out</li>
-              <li>• Space: Activate boost (when meter is full)</li>
-              <li>• Click: Restart (when dead)</li>
-            </ul>
-          </div>
-        </div>
-      )}
-      
       {/* Stats button - always visible */}
       <button
         onClick={handleShowStats}
@@ -1245,21 +1369,6 @@ const GameCanvas = ({
           
           <div className="flex items-center justify-between gap-4">
             <span className="text-white">Zoom: {Math.round(zoom * 100)}%</span>
-            
-            <div className="flex gap-2">
-              <button 
-                onClick={handleZoomOut}
-                className="w-6 h-6 flex items-center justify-center bg-gray-800 rounded hover:bg-gray-700"
-              >
-                <span className="text-white">-</span>
-              </button>
-              <button 
-                onClick={handleZoomIn}
-                className="w-6 h-6 flex items-center justify-center bg-gray-800 rounded hover:bg-gray-700"
-              >
-                <span className="text-white">+</span>
-              </button>
-            </div>
           </div>
         </div>
       </div>

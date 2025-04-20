@@ -256,39 +256,148 @@ export const displayStats = () => {
     const stats = JSON.parse(localStats);
     console.log("Player stats:", stats);
     
-    // Display stats on screen
+    // Display stats on screen with improved UI
     const statsDisplay = document.createElement('div');
     statsDisplay.style.position = 'fixed';
-    statsDisplay.style.top = '20px';
+    statsDisplay.style.top = '50%';
     statsDisplay.style.left = '50%';
-    statsDisplay.style.transform = 'translateX(-50%)';
-    statsDisplay.style.padding = '10px 20px';
-    statsDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    statsDisplay.style.transform = 'translate(-50%, -50%)';
+    statsDisplay.style.padding = '20px 30px';
+    statsDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
     statsDisplay.style.color = '#fff';
-    statsDisplay.style.borderRadius = '5px';
+    statsDisplay.style.borderRadius = '15px';
     statsDisplay.style.zIndex = '9999';
-    statsDisplay.style.fontFamily = 'sans-serif';
+    statsDisplay.style.fontFamily = 'system-ui, sans-serif';
+    statsDisplay.style.boxShadow = '0 4px 30px rgba(0, 0, 0, 0.5)';
+    statsDisplay.style.backdropFilter = 'blur(10px)';
+    statsDisplay.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+    statsDisplay.style.width = '300px';
+    statsDisplay.style.textAlign = 'center';
+    statsDisplay.style.animation = 'fadeIn 0.5s ease-out';
+    
+    // Add animation styles
+    const styleElement = document.createElement('style');
+    styleElement.textContent = `
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translate(-50%, -40%); }
+        to { opacity: 1; transform: translate(-50%, -50%); }
+      }
+      @keyframes fadeOut {
+        from { opacity: 1; transform: translate(-50%, -50%); }
+        to { opacity: 0; transform: translate(-50%, -60%); }
+      }
+      .stat-title {
+        font-size: 20px;
+        font-weight: bold;
+        margin-bottom: 15px;
+        color: #fff;
+      }
+      .stat-row {
+        display: flex;
+        justify-content: space-between;
+        margin: 10px 0;
+        padding-bottom: 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .stat-label {
+        color: rgba(255, 255, 255, 0.7);
+      }
+      .stat-value {
+        font-weight: bold;
+      }
+      .highlight {
+        color: #f5a623;
+        font-size: 18px;
+      }
+      .close-button {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: none;
+        border: none;
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 18px;
+        cursor: pointer;
+        padding: 0;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .close-button:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+      }
+    `;
+    document.head.appendChild(styleElement);
     
     const playTimeMinutes = Math.floor(stats.total_play_time / 60);
     const playTimeSeconds = stats.total_play_time % 60;
+    const lastPlayedDate = new Date(stats.last_played).toLocaleString(undefined, { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
     
     statsDisplay.innerHTML = `
-      <strong>Your Game Stats</strong><br>
-      High Score: ${stats.high_score}<br>
-      Games Played: ${stats.games_played}<br>
-      Longest Snake: ${stats.longest_snake}<br>
-      Total Play Time: ${playTimeMinutes}m ${playTimeSeconds}s<br>
-      Last Played: ${new Date(stats.last_played).toLocaleString()}
+      <button class="close-button" onclick="this.parentNode.remove()">×</button>
+      <div class="stat-title">Game Stats</div>
+      
+      <div class="highlight">Score: ${stats.high_score}</div>
+      
+      <div class="stat-row">
+        <span class="stat-label">Games Played</span>
+        <span class="stat-value">${stats.games_played}</span>
+      </div>
+      
+      <div class="stat-row">
+        <span class="stat-label">Longest Snake</span>
+        <span class="stat-value">${stats.longest_snake} segments</span>
+      </div>
+      
+      <div class="stat-row">
+        <span class="stat-label">Total Play Time</span>
+        <span class="stat-value">${playTimeMinutes}m ${playTimeSeconds}s</span>
+      </div>
+      
+      <div class="stat-row" style="border-bottom: none;">
+        <span class="stat-label">Last Played</span>
+        <span class="stat-value">${lastPlayedDate}</span>
+      </div>
     `;
     
     document.body.appendChild(statsDisplay);
     
-    // Remove after 5 seconds
+    // Add close functionality
+    const closeButton = statsDisplay.querySelector('.close-button');
+    if (closeButton) {
+      closeButton.addEventListener('click', () => {
+        statsDisplay.style.animation = 'fadeOut 0.3s ease-in forwards';
+        setTimeout(() => {
+          if (statsDisplay.parentNode) {
+            statsDisplay.parentNode.removeChild(statsDisplay);
+          }
+          document.head.removeChild(styleElement);
+        }, 300);
+      });
+    }
+    
+    // Remove after 8 seconds (longer display time)
     setTimeout(() => {
       if (statsDisplay.parentNode) {
-        statsDisplay.parentNode.removeChild(statsDisplay);
+        statsDisplay.style.animation = 'fadeOut 0.3s ease-in forwards';
+        setTimeout(() => {
+          if (statsDisplay.parentNode) {
+            statsDisplay.parentNode.removeChild(statsDisplay);
+          }
+          document.head.removeChild(styleElement);
+        }, 300);
       }
-    }, 5000);
+    }, 8000);
     
     return stats;
   } catch (e) {
