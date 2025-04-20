@@ -1337,20 +1337,132 @@ const GameCanvas = ({
           </div>
         )}
         
-        {/* Show game controls helper */}
-        {showControls && (
-          <div className="absolute bottom-4 left-4 px-4 py-3 rounded-lg bg-black/50 backdrop-blur-sm transition-opacity duration-300">
-            <div className="text-xs text-white">
-              <p className="font-semibold mb-1">Controls:</p>
-              <ul className="text-gray-300 space-y-1">
-                <li>• Mouse: Move snake</li>
-                <li>• Scroll: Zoom in/out</li>
-                <li>• Space: Activate boost (when meter is full)</li>
-                <li>• Click: Restart (when dead)</li>
-              </ul>
+        {/* Improved Game Controls Helper */}
+        <div className="absolute bottom-4 left-4 z-10 rounded-lg bg-black/60 backdrop-blur-md border border-indigo-500/30 shadow-xl overflow-hidden">
+          <div className="bg-indigo-900/70 px-3 py-1.5">
+            <h3 className="text-white font-medium text-sm">Game Controls</h3>
+          </div>
+          <div className="p-3">
+            <ul className="space-y-2 text-sm">
+              <li className="flex items-center text-gray-200">
+                <div className="w-8 h-6 flex items-center justify-center bg-gray-800 rounded mr-2 text-xs font-mono">
+                  WASD
+                </div>
+                <span>Move snake</span>
+              </li>
+              <li className="flex items-center text-gray-200">
+                <div className="w-8 h-6 flex items-center justify-center bg-gray-800 rounded mr-2 text-xs">
+                  <span className="transform rotate-90">⟳</span>
+                </div>
+                <span>Zoom in/out</span>
+              </li>
+              <li className="flex items-center text-gray-200">
+                <div className="w-8 h-6 flex items-center justify-center bg-gray-800 rounded mr-2 text-xs font-mono">
+                  Space
+                </div>
+                <span>Boost speed</span>
+              </li>
+              {!isOnlineMode && (
+                <li className="flex items-center text-gray-200">
+                  <div className="w-8 h-6 flex items-center justify-center bg-gray-800 rounded mr-2 text-xs">
+                    🖱️
+                  </div>
+                  <span>Alternative movement</span>
+                </li>
+              )}
+            </ul>
+          </div>
+        </div>
+
+        {/* Mini Map */}
+        <div className="absolute bottom-4 right-4 z-10 w-48 h-48 bg-black/60 backdrop-blur-md border border-indigo-500/30 rounded-lg shadow-xl overflow-hidden">
+          <div className="bg-indigo-900/70 px-3 py-1.5 flex justify-between items-center">
+            <h3 className="text-white font-medium text-sm">Mini Map</h3>
+            <div className="text-xs text-indigo-200">
+              {Math.round(zoom * 100)}% zoom
             </div>
           </div>
-        )}
+          <div className="relative w-full h-[calc(100%-32px)] bg-indigo-950/50 p-1">
+            {gameState && (
+              <>
+                {/* Map border */}
+                <div className="absolute inset-1 border border-indigo-500/30 rounded"></div>
+                
+                {/* Food dots */}
+                {gameState.foods.map((food) => {
+                  const x = (food.position.x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100;
+                  const y = (food.position.y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100;
+                  return (
+                    <div 
+                      key={food.id}
+                      className="absolute w-1 h-1 rounded-full bg-yellow-400"
+                      style={{ 
+                        left: `${x}%`, 
+                        top: `${y}%`,
+                        transform: 'translate(-50%, -50%)'
+                      }}
+                    ></div>
+                  );
+                })}
+                
+                {/* Power-ups */}
+                {gameState.powerUps?.map((powerUp) => {
+                  const x = (powerUp.position.x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100;
+                  const y = (powerUp.position.y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100;
+                  return (
+                    <div 
+                      key={powerUp.id}
+                      className="absolute w-2 h-2 rounded-full bg-purple-500 animate-pulse"
+                      style={{ 
+                        left: `${x}%`, 
+                        top: `${y}%`,
+                        transform: 'translate(-50%, -50%)'
+                      }}
+                    ></div>
+                  );
+                })}
+                
+                {/* Snakes */}
+                {gameState.snakes.filter(snake => snake.alive).map((snake) => {
+                  const head = snake.segments[0];
+                  const x = (head.x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100;
+                  const y = (head.y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100;
+                  const isPlayerSnake = snake.id === playerId;
+                  return (
+                    <div 
+                      key={snake.id}
+                      className={`absolute w-2 h-2 rounded-full ${isPlayerSnake ? 'bg-cyan-400 ring-2 ring-white' : 'bg-red-500'}`}
+                      style={{ 
+                        left: `${x}%`, 
+                        top: `${y}%`,
+                        transform: 'translate(-50%, -50%)'
+                      }}
+                    ></div>
+                  );
+                })}
+                
+                {/* Visible area indicator */}
+                {playerSnake && playerSnake.segments.length > 0 && (
+                  <div
+                    className="absolute border-2 border-white/50 rounded pointer-events-none"
+                    style={{
+                      left: `${(playerSnake.segments[0].x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100}%`,
+                      top: `${(playerSnake.segments[0].y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100}%`,
+                      width: `${(canvasSize.width / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100 / zoom}%`,
+                      height: `${(canvasSize.height / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100 / zoom}%`,
+                      transform: 'translate(-50%, -50%)'
+                    }}
+                  ></div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Sound control - moved slightly up to not overlap with mini-map */}
+        <div className="absolute bottom-56 right-4 z-10">
+          <SoundControl />
+        </div>
         
         {/* Stats button - always visible */}
         <button
@@ -1389,7 +1501,7 @@ const GameCanvas = ({
         )}
         
         {/* Game status indicators */}
-        <div className={`absolute top-20 right-4 px-3 py-2 rounded-lg bg-black/50 backdrop-blur-sm text-xs font-medium transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+        <div className="absolute top-20 right-4 px-3 py-2 rounded-lg bg-black/50 backdrop-blur-sm text-xs font-medium">
           <div className="flex flex-col gap-2">
             {isConnecting ? (
               <div className="flex items-center gap-2">
@@ -1409,7 +1521,7 @@ const GameCanvas = ({
             )}
             
             <div className="flex items-center justify-between gap-4">
-              <span className="text-white">Zoom: {Math.round(zoom * 100)}%</span>
+              <span className="text-white">Zoom:</span>
               
               <div className="flex gap-2">
                 <button 
@@ -1428,9 +1540,7 @@ const GameCanvas = ({
             </div>
           </div>
         </div>
-        
-        {/* Sound control */}
-        <SoundControl />
+
       </div>
     </div>
   );
