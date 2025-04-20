@@ -135,15 +135,62 @@ export class GameEngine {
   public addPlayer(name: string): string {
     const id = uuidv4();
     
-    // Spawn player away from edges
-    const padding = 200;
-    const position: Point = {
+    // Spawn player away from edges with a larger safe zone
+    const padding = 300; // Increased from 200
+    
+    // Try multiple spawn locations to find a safe one
+    let attempts = 0;
+    let position: Point = {
       x: padding + Math.random() * (this.state.width - padding * 2),
       y: padding + Math.random() * (this.state.height - padding * 2),
     };
+    let isSafe = false;
     
+    // Keep trying until we find a safe position or reach max attempts
+    while (!isSafe && attempts < 10) {
+      // Generate a new position each attempt
+      position = {
+        x: padding + Math.random() * (this.state.width - padding * 2),
+        y: padding + Math.random() * (this.state.height - padding * 2),
+      };
+      
+      // Check for proximity to other snakes
+      isSafe = true;
+      for (const otherSnake of this.state.snakes) {
+        if (!otherSnake.alive || otherSnake.segments.length === 0) continue;
+        
+        // Check distance to other snake's head
+        const head = otherSnake.segments[0];
+        const dist = Math.sqrt(
+          Math.pow(position.x - head.x, 2) + 
+          Math.pow(position.y - head.y, 2)
+        );
+        
+        // If too close to another snake, try again
+        if (dist < 200) {
+          isSafe = false;
+          break;
+        }
+      }
+      
+      attempts++;
+    }
+    
+    // Create the snake
     const snake = createSnake(id, name, position);
+    
+    // Save creation time on the snake for accurate play time calculation
+    (snake as any).createdAt = Date.now();
+    
+    // Add to snakes list
     this.state.snakes.push(snake);
+    
+    // Make sure the snake is initialized with a reasonable non-zero speed
+    // This ensures proper movement from the start
+    if (snake.speed === 0) {
+      snake.speed = 2.5; // Default movement speed
+      snake.baseSpeed = 2.5;
+    }
     
     return id;
   }

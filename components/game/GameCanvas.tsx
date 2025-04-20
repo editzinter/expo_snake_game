@@ -871,11 +871,6 @@ const GameCanvas = ({
       document.exitPointerLock();
     }
     
-    // First, test database connection 
-    testDatabaseConnection().then(result => {
-      console.log("Database connection test before recording death stats:", result);
-    });
-    
     // Get the player's final stats
     let finalState;
     let playerSnake;
@@ -895,6 +890,26 @@ const GameCanvas = ({
     
     // Calculate play time in seconds
     const playTimeSeconds = Math.floor((Date.now() - gameStartTime) / 1000);
+    
+    // If the player has played for less than 2 seconds, this is likely a false death event
+    // This prevents the instant game over screen bug
+    if (playTimeSeconds < 2) {
+      console.log("Ignoring death event that occurred too soon after game start");
+      
+      // Instead of showing death stats, restart the player if in local mode
+      if (!isOnlineMode && gameEngine) {
+        console.log("Auto-restarting player in local mode");
+        gameEngine.removePlayer(playerId);
+        const newId = gameEngine.addPlayer(playerName);
+        setPlayerId(newId);
+      }
+      return;
+    }
+    
+    // Test database connection 
+    testDatabaseConnection().then(result => {
+      console.log("Database connection test before recording death stats:", result);
+    });
     
     // Prepare stats object
     const stats: GameStats = {
