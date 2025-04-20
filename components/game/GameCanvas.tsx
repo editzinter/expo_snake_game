@@ -884,7 +884,7 @@ const GameCanvas = ({
           gameSocketClient.connect();
           gameSocketClient.joinGame(playerName);
         }, 500);
-      } else if (gameEngine) {
+      } else if (gameEngine && playerId) {
         // For local mode, create a new player
         gameEngine.removePlayer(playerId);
         const newId = gameEngine.addPlayer(playerName);
