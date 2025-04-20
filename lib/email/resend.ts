@@ -2,13 +2,32 @@
 
 import { Resend } from 'resend';
 
+// Define a type for our mock implementation
+type ResendLike = {
+  emails: {
+    send: (params: any) => Promise<{ data: any | null; error: Error | null }>;
+  }
+};
+
 // Initialize the Resend client with API key from environment variable
 // Add fallback and error handling for missing API key
-const apiKey = process.env.RESEND_API_KEY || '';
-if (!apiKey) {
-  console.warn("Warning: RESEND_API_KEY is not set. Email functionality will not work properly.");
+let resend: ResendLike;
+
+try {
+  const apiKey = process.env.RESEND_API_KEY || '';
+  if (!apiKey) {
+    console.warn("Warning: RESEND_API_KEY is not set. Email functionality will not work properly.");
+  }
+  resend = new Resend(apiKey);
+} catch (error) {
+  console.error("Failed to initialize Resend client:", error);
+  // Create a mock resend object to prevent build failures
+  resend = {
+    emails: {
+      send: () => Promise.resolve({ data: null, error: new Error("Resend client not properly initialized") })
+    }
+  };
 }
-const resend = new Resend(apiKey);
 
 /**
  * Sends a magic link email for user authentication
