@@ -25,17 +25,165 @@ const BORDER_DANGER_ZONE = 30; // Distance from map edge that is dangerous
 export type GameEventType = 'foodCollect' | 'specialFoodCollect' | 'playerDeath' | 'playerDeathBorder' | 'boostStart' | 'boostEnd' | 'playerKill';
 export type GameEventListener = (event: GameEventType, data?: any) => void;
 
+// Add QuadTree implementation for spatial partitioning
+class QuadTree {
+  private boundary: { x: number, y: number, width: number, height: number };
+  private capacity: number;
+  private objects: Array<{ id: string, x: number, y: number, radius?: number }>;
+  private divided: boolean;
+  private northwest: QuadTree | null;
+  private northeast: QuadTree | null;
+  private southwest: QuadTree | null;
+  private southeast: QuadTree | null;
+
+  constructor(boundary: { x: number, y: number, width: number, height: number }, capacity: number) {
+    this.boundary = boundary;
+    this.capacity = capacity;
+    this.objects = [];
+    this.divided = false;
+    this.northwest = null;
+    this.northeast = null;
+    this.southwest = null;
+    this.southeast = null;
+  }
+
+  // Subdivide this quadtree into four equal parts
+  subdivide() {
+    const x = this.boundary.x;
+    const y = this.boundary.y;
+    const w = this.boundary.width / 2;
+    const h = this.boundary.height / 2;
+
+    this.northwest = new QuadTree({ x: x, y: y, width: w, height: h }, this.capacity);
+    this.northeast = new QuadTree({ x: x + w, y: y, width: w, height: h }, this.capacity);
+    this.southwest = new QuadTree({ x: x, y: y + h, width: w, height: h }, this.capacity);
+    this.southeast = new QuadTree({ x: x + w, y: y + h, width: w, height: h }, this.capacity);
+
+    this.divided = true;
+  }
+
+  // Insert an object into the quadtree
+  insert(object: { id: string, x: number, y: number, radius?: number }): boolean {
+    // Check if this object is within the boundary
+    if (!this.contains(object)) {
+      return false;
+    }
+
+    // If there's space in this quadtree and it's not divided, add the object here
+    if (this.objects.length < this.capacity && !this.divided) {
+      this.objects.push(object);
+      return true;
+    }
+
+    // Otherwise, subdivide and then add the object to whichever quadrant will accept it
+    if (!this.divided) {
+      this.subdivide();
+    }
+
+    return (
+      this.northwest!.insert(object) ||
+      this.northeast!.insert(object) ||
+      this.southwest!.insert(object) ||
+      this.southeast!.insert(object)
+    );
+  }
+
+  // Check if a point is within the boundary
+  contains(point: { x: number, y: number }): boolean {
+    return (
+      point.x >= this.boundary.x &&
+      point.x <= this.boundary.x + this.boundary.width &&
+      point.y >= this.boundary.y &&
+      point.y <= this.boundary.y + this.boundary.height
+    );
+  }
+
+  // Query all objects that could collide with the given area
+  query(range: { x: number, y: number, width: number, height: number }, found: Array<{ id: string, x: number, y: number, radius?: number }> = []): Array<{ id: string, x: number, y: number, radius?: number }> {
+    // If the range doesn't intersect this quad, return empty array
+    if (!this.intersects(range)) {
+      return found;
+    }
+
+    // Check objects at this level
+    for (let i = 0; i < this.objects.length; i++) {
+      if (this.objectInRange(this.objects[i], range)) {
+        found.push(this.objects[i]);
+      }
+    }
+
+    // If this quad is divided, check children
+    if (this.divided) {
+      this.northwest!.query(range, found);
+      this.northeast!.query(range, found);
+      this.southwest!.query(range, found);
+      this.southeast!.query(range, found);
+    }
+
+    return found;
+  }
+
+  // Check if the range intersects this quad
+  intersects(range: { x: number, y: number, width: number, height: number }): boolean {
+    return !(
+      range.x > this.boundary.x + this.boundary.width ||
+      range.x + range.width < this.boundary.x ||
+      range.y > this.boundary.y + this.boundary.height ||
+      range.y + range.height < this.boundary.y
+    );
+  }
+
+  // Check if an object is within the search range
+  objectInRange(object: { x: number, y: number, radius?: number }, range: { x: number, y: number, width: number, height: number }): boolean {
+    // Use radius if available, or default to point check
+    const radius = object.radius || 0;
+    return (
+      object.x + radius >= range.x &&
+      object.x - radius <= range.x + range.width &&
+      object.y + radius >= range.y &&
+      object.y - radius <= range.y + range.height
+    );
+  }
+
+  // Clear all objects from the quadtree
+  clear() {
+    this.objects = [];
+    
+    if (this.divided) {
+      this.northwest!.clear();
+      this.northeast!.clear();
+      this.southwest!.clear();
+      this.southeast!.clear();
+      
+      this.divided = false;
+      this.northwest = null;
+      this.northeast = null;
+      this.southwest = null;
+      this.southeast = null;
+    }
+  }
+}
+
 export class GameEngine {
   private state: GameState;
   private lastTick: number = 0;
   private foodSpawnCounter: number = 0;
   private eventListeners: GameEventListener[] = [];
+  private quadtree: QuadTree | null;
   
   constructor(width: number, height: number) {
     this.state = createEmptyGameState(width, height);
     
     // Initialize food
     this.spawnInitialFood();
+
+    // Initialize the quadtree with the world boundaries
+    this.quadtree = new QuadTree({ 
+      x: 0, 
+      y: 0, 
+      width: width, 
+      height: height 
+    }, 8); // Capacity of 8 objects per quad before subdividing
   }
   
   // Add an event listener
@@ -198,8 +346,14 @@ export class GameEngine {
     // Update snakes
     this.updateSnakes(deltaTime);
     
-    // Check collisions
-    this.checkCollisions();
+    // Update the quadtree with current positions of all objects
+    this.updateSpatialPartitioning();
+    
+    // Check for snake-food collisions using the quadtree
+    this.checkFoodCollisions();
+    
+    // Check for snake-snake collisions using the quadtree
+    this.checkSnakeCollisions();
     
     // Spawn new food periodically
     this.foodSpawnCounter += deltaTime;
@@ -303,80 +457,189 @@ export class GameEngine {
     }
   }
   
-  // Check for collisions between snakes and food
-  private checkCollisions(): void {
-    // Check snake-food collisions
+  // Update the spatial partitioning structure with current game objects
+  private updateSpatialPartitioning(): void {
+    if (!this.quadtree) return;
+    
+    // Clear and rebuild the quadtree
+    this.quadtree.clear();
+    
+    // Add snake heads to the quadtree
     for (const snake of this.state.snakes) {
-      if (!snake.alive) continue;
+      if (snake.alive && snake.segments.length > 0) {
+        const head = snake.segments[0];
+        this.quadtree.insert({ 
+          id: snake.id, 
+          x: head.x, 
+          y: head.y, 
+          radius: 5 // Collision radius for snake head
+        });
+      }
+    }
+    
+    // Add food to the quadtree
+    for (const food of this.state.foods) {
+      this.quadtree.insert({ 
+        id: food.id, 
+        x: food.position.x, 
+        y: food.position.y, 
+        radius: food.radius
+      });
+    }
+  }
+
+  // Modified method to use quadtree for food collision detection
+  private checkFoodCollisions(): void {
+    if (!this.quadtree) return;
+    
+    for (const snake of this.state.snakes) {
+      if (!snake.alive || snake.segments.length === 0) continue;
       
       const head = snake.segments[0];
-      const foodsToRemove: string[] = [];
       
-      // Check collision with food
-      for (const food of this.state.foods) {
-        if (distance(head, food.position) < FOOD_COLLISION_DISTANCE + food.radius) {
-          // Snake eats food
-          snake.score += food.value;
+      // Query the quadtree for potential collisions in the area around the snake head
+      const searchArea = { 
+        x: head.x - 10, 
+        y: head.y - 10, 
+        width: 20, 
+        height: 20 
+      };
+      
+      const potentialCollisions = this.quadtree.query(searchArea);
+      
+      // Check collisions only with food items
+      for (let i = 0; i < this.state.foods.length; i++) {
+        const food = this.state.foods[i];
+        
+        // Skip if this food isn't in our potential collisions
+        if (!potentialCollisions.some(obj => obj.id === food.id)) continue;
+        
+        // Check actual collision
+        const dx = head.x - food.position.x;
+        const dy = head.y - food.position.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < 5 + food.radius) {
+          // Food is collected
+          this.collectFood(snake, i);
+          // Since we've removed this food, we need to break to avoid index issues
+          break;
+        }
+      }
+    }
+  }
+
+  // Method to handle a snake collecting food
+  private collectFood(snake: Snake, foodIndex: number): void {
+    const food = this.state.foods[foodIndex];
+    
+    // Snake eats food
+    snake.score += food.value;
+    
+    // Add new segments to the snake (growth)
+    const tail = snake.segments[snake.segments.length - 1];
+    
+    // Growth proportional to food value
+    for (let i = 0; i < food.value; i++) {
+      snake.segments.push({ ...tail });
+    }
+    
+    // Update boost meter for special food
+    if (food.value > 2) {
+      // Special food increases boost meter by 25%
+      snake.boostMeter = Math.min(100, snake.boostMeter + 25);
+      this.emitEvent('specialFoodCollect', { 
+        playerId: snake.id, 
+        foodValue: food.value,
+        boostMeter: snake.boostMeter
+      });
+    } else {
+      // Regular food increases boost meter by a tiny amount (5%)
+      snake.boostMeter = Math.min(100, snake.boostMeter + 5);
+      this.emitEvent('foodCollect', { 
+        playerId: snake.id, 
+        foodValue: food.value,
+        boostMeter: snake.boostMeter
+      });
+    }
+    
+    // Remove the eaten food
+    this.state.foods.splice(foodIndex, 1);
+  }
+
+  // Modified method to use quadtree for snake collision detection
+  private checkSnakeCollisions(): void {
+    if (!this.quadtree) return;
+    
+    for (let i = 0; i < this.state.snakes.length; i++) {
+      const snake = this.state.snakes[i];
+      if (!snake.alive || snake.segments.length === 0) continue;
+      
+      const head = snake.segments[0];
+      
+      // Query the quadtree for potential collisions in the area around the snake head
+      const searchArea = { 
+        x: head.x - 10, 
+        y: head.y - 10, 
+        width: 20, 
+        height: 20 
+      };
+      
+      const potentialCollisions = this.quadtree.query(searchArea);
+      
+      // Check collisions with other snakes
+      for (let j = 0; j < this.state.snakes.length; j++) {
+        if (i === j) continue; // Skip self
+        
+        const otherSnake = this.state.snakes[j];
+        if (!otherSnake.alive) continue;
+        
+        // Skip if this snake's head isn't in our potential collisions
+        if (!potentialCollisions.some(obj => obj.id === otherSnake.id)) continue;
+        
+        // Check collision with other snake's segments
+        // Start from 0 to check head-to-head collisions
+        for (let k = 0; k < otherSnake.segments.length; k++) {
+          const segment = otherSnake.segments[k];
           
-          // Add new segments to the snake (growth)
-          const tail = snake.segments[snake.segments.length - 1];
+          const dx = head.x - segment.x;
+          const dy = head.y - segment.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
           
-          // Growth proportional to food value
-          for (let i = 0; i < food.value; i++) {
-            snake.segments.push({ ...tail });
+          // If it's a head-to-head collision, the larger snake wins
+          if (k === 0 && distance < 10) {
+            if (snake.segments.length > otherSnake.segments.length) {
+              this.killSnake(j, snake);
+              break;
+            } else if (snake.segments.length < otherSnake.segments.length) {
+              this.killSnake(i, otherSnake);
+              break;
+            } else {
+              // If they're the same size, both die
+              this.killSnake(i);
+              this.killSnake(j);
+              break;
+            }
           }
-          
-          // Update boost meter for special food
-          if (food.value > 2) {
-            // Special food increases boost meter by 25%
-            snake.boostMeter = Math.min(100, snake.boostMeter + 25);
-            this.emitEvent('specialFoodCollect', { 
-              playerId: snake.id, 
-              foodValue: food.value,
-              boostMeter: snake.boostMeter
-            });
-          } else {
-            // Regular food increases boost meter by a tiny amount (5%)
-            snake.boostMeter = Math.min(100, snake.boostMeter + 5);
-            this.emitEvent('foodCollect', { 
-              playerId: snake.id, 
-              foodValue: food.value,
-              boostMeter: snake.boostMeter
-            });
+          // Otherwise, if colliding with any segment (including head), the moving snake dies
+          else if (distance < 10) {
+            this.killSnake(i, otherSnake);
+            break;
           }
-          
-          foodsToRemove.push(food.id);
         }
       }
       
-      // Remove eaten food
-      if (foodsToRemove.length > 0) {
-        this.state.foods = this.state.foods.filter(
-          food => !foodsToRemove.includes(food.id)
-        );
-      }
-      
-      // Check snake-snake collisions
-      for (const otherSnake of this.state.snakes) {
-        // Skip self or dead snakes
-        if (snake.id === otherSnake.id || !otherSnake.alive) continue;
+      // Also check collision with own segments (except the head)
+      for (let k = 2; k < snake.segments.length; k++) {
+        const segment = snake.segments[k];
         
-        // Check collision with other snake's body (not head)
-        for (let i = 1; i < otherSnake.segments.length; i++) {
-          if (distance(head, otherSnake.segments[i]) < COLLISION_DISTANCE) {
-            // Drop food from the dying snake
-            this.dropFoodFromSnake(snake);
-            
-            // This snake died by collision
-            snake.alive = false;
-            
-            // Emit death event
-            this.emitEvent('playerDeath', { playerId: snake.id, killedBy: otherSnake.id });
-            
-            // Award points to the snake that was hit
-            otherSnake.score += Math.floor(snake.segments.length / 2);
-            break;
-          }
+        const dx = head.x - segment.x;
+        const dy = head.y - segment.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < 10) {
+          this.killSnake(i);
+          break;
         }
       }
     }
