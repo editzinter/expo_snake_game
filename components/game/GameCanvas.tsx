@@ -1210,9 +1210,11 @@ const GameCanvas = ({
 
   // Show tutorial for first-time players
   useEffect(() => {
-    const hasSeen = localStorage.getItem('hasTutorialBeenSeen');
-    if (!hasSeen) {
-      setShowTutorial(true);
+    // Always show tutorial on initial component mount
+    setShowTutorial(true);
+    
+    // Store that user has seen tutorial
+    if (!localStorage.getItem('hasTutorialBeenSeen')) {
       localStorage.setItem('hasTutorialBeenSeen', 'true');
     }
   }, []);
@@ -1383,79 +1385,88 @@ const GameCanvas = ({
             </div>
           </div>
           <div className="relative w-full h-[calc(100%-32px)] bg-indigo-950/50 p-1">
-            {gameState && (
-              <>
-                {/* Map border */}
-                <div className="absolute inset-1 border border-indigo-500/30 rounded"></div>
-                
-                {/* Food dots */}
-                {gameState.foods.map((food) => {
-                  const x = (food.position.x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100;
-                  const y = (food.position.y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100;
-                  return (
-                    <div 
-                      key={food.id}
-                      className="absolute w-1 h-1 rounded-full bg-yellow-400"
-                      style={{ 
-                        left: `${x}%`, 
-                        top: `${y}%`,
-                        transform: 'translate(-50%, -50%)'
-                      }}
-                    ></div>
-                  );
-                })}
-                
-                {/* Power-ups */}
-                {gameState.powerUps?.map((powerUp) => {
-                  const x = (powerUp.position.x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100;
-                  const y = (powerUp.position.y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100;
-                  return (
-                    <div 
-                      key={powerUp.id}
-                      className="absolute w-2 h-2 rounded-full bg-purple-500 animate-pulse"
-                      style={{ 
-                        left: `${x}%`, 
-                        top: `${y}%`,
-                        transform: 'translate(-50%, -50%)'
-                      }}
-                    ></div>
-                  );
-                })}
-                
-                {/* Snakes */}
-                {gameState.snakes.filter(snake => snake.alive).map((snake) => {
-                  const head = snake.segments[0];
-                  const x = (head.x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100;
-                  const y = (head.y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100;
-                  const isPlayerSnake = snake.id === playerId;
-                  return (
-                    <div 
-                      key={snake.id}
-                      className={`absolute w-2 h-2 rounded-full ${isPlayerSnake ? 'bg-cyan-400 ring-2 ring-white' : 'bg-red-500'}`}
-                      style={{ 
-                        left: `${x}%`, 
-                        top: `${y}%`,
-                        transform: 'translate(-50%, -50%)'
-                      }}
-                    ></div>
-                  );
-                })}
-                
-                {/* Visible area indicator */}
-                {playerSnake && playerSnake.segments.length > 0 && (
-                  <div
-                    className="absolute border-2 border-white/50 rounded pointer-events-none"
-                    style={{
-                      left: `${(playerSnake.segments[0].x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100}%`,
-                      top: `${(playerSnake.segments[0].y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100}%`,
-                      width: `${(canvasSize.width / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100 / zoom}%`,
-                      height: `${(canvasSize.height / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100 / zoom}%`,
+            {/* Map border - always visible */}
+            <div className="absolute inset-1 border border-indigo-500/30 rounded"></div>
+            
+            {/* Grid background for mini-map */}
+            <div className="absolute inset-1 grid grid-cols-10 grid-rows-10 pointer-events-none">
+              {[...Array(100)].map((_, i) => (
+                <div 
+                  key={i} 
+                  className="border border-indigo-500/10"
+                ></div>
+              ))}
+            </div>
+            
+            {/* Display map content regardless of gameState */}
+            <>
+              {/* Food dots */}
+              {(gameState?.foods || []).map((food) => {
+                const x = (food.position.x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100;
+                const y = (food.position.y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100;
+                return (
+                  <div 
+                    key={food.id}
+                    className="absolute w-1 h-1 rounded-full bg-yellow-400"
+                    style={{ 
+                      left: `${x}%`, 
+                      top: `${y}%`,
                       transform: 'translate(-50%, -50%)'
                     }}
                   ></div>
-                )}
-              </>
-            )}
+                );
+              })}
+              
+              {/* Power-ups */}
+              {(gameState?.powerUps || []).map((powerUp) => {
+                const x = (powerUp.position.x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100;
+                const y = (powerUp.position.y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100;
+                return (
+                  <div 
+                    key={powerUp.id}
+                    className="absolute w-2 h-2 rounded-full bg-purple-500 animate-pulse"
+                    style={{ 
+                      left: `${x}%`, 
+                      top: `${y}%`,
+                      transform: 'translate(-50%, -50%)'
+                    }}
+                  ></div>
+                );
+              })}
+              
+              {/* Snakes - Get from gameEngine if not in online mode */}
+              {(gameState?.snakes || (gameEngine ? gameEngine.getState().snakes : [])).filter(snake => snake.alive).map((snake) => {
+                const head = snake.segments[0];
+                const x = (head.x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100;
+                const y = (head.y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100;
+                const isPlayerSnake = snake.id === playerId;
+                return (
+                  <div 
+                    key={snake.id}
+                    className={`absolute w-2 h-2 rounded-full ${isPlayerSnake ? 'bg-cyan-400 ring-2 ring-white' : 'bg-red-500'}`}
+                    style={{ 
+                      left: `${x}%`, 
+                      top: `${y}%`,
+                      transform: 'translate(-50%, -50%)'
+                    }}
+                  ></div>
+                );
+              })}
+              
+              {/* Visible area indicator - works with playerSnake from either source */}
+              {playerSnake && playerSnake.segments.length > 0 && (
+                <div
+                  className="absolute border-2 border-white/50 rounded pointer-events-none"
+                  style={{
+                    left: `${(playerSnake.segments[0].x / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100}%`,
+                    top: `${(playerSnake.segments[0].y / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100}%`,
+                    width: `${(canvasSize.width / (forceOnlineMode ? MAP_WIDTH*1.5 : MAP_WIDTH)) * 100 / zoom}%`,
+                    height: `${(canvasSize.height / (forceOnlineMode ? MAP_HEIGHT*1.5 : MAP_HEIGHT)) * 100 / zoom}%`,
+                    transform: 'translate(-50%, -50%)'
+                  }}
+                ></div>
+              )}
+            </>
           </div>
         </div>
 
