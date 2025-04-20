@@ -10,6 +10,10 @@ import {
   createSnake,
   createFood,
   createEmptyGameState,
+  PowerUp,
+  createPowerUp,
+  PowerUpType,
+  ActivePowerUp
 } from './models';
 
 // Constants for game configuration
@@ -22,47 +26,22 @@ const FOOD_COLLISION_DISTANCE = 15;
 const BORDER_DANGER_ZONE = 30; // Distance from map edge that is dangerous
 
 // Define event types for sound events
-export type GameEventType = 'foodCollect' | 'specialFoodCollect' | 'playerDeath' | 'playerDeathBorder' | 'boostStart' | 'boostEnd' | 'playerKill';
+export type GameEventType = 'foodCollect' | 'specialFoodCollect' | 'playerDeath' | 'playerDeathBorder' | 'boostStart' | 'boostEnd' | 'playerKill' | 'powerUpCollect' | 'powerUpExpire';
 export type GameEventListener = (event: GameEventType, data?: any) => void;
-
-// Define AIController interface
-interface AIController {
-  snake: Snake;
-  update(engine: GameEngine): void;
-}
-
-// Function to check if a point is within a grid cell
-function getGridCell(x: number, y: number, cellSize: number, worldWidth: number, worldHeight: number): { row: number, col: number } {
-  // Ensure coordinates are within world bounds
-  const safeX = Math.max(0, Math.min(x, worldWidth - 1));
-  const safeY = Math.max(0, Math.min(y, worldHeight - 1));
-  
-  const col = Math.floor(safeX / cellSize);
-  const row = Math.floor(safeY / cellSize);
-  
-  return { row, col };
-}
 
 export class GameEngine {
   private state: GameState;
   private lastTick: number = 0;
   private foodSpawnCounter: number = 0;
   private eventListeners: GameEventListener[] = [];
-  private snakes: Snake[] = [];
-  private food: Food[] = [];
-  private specialFood: Food[] = [];
-  private worldWidth: number;
-  private worldHeight: number;
-  private autoIncrementId: number = 0;
-  private lastFoodTime: number = 0;
-  private aiControllers: AIController[] = [];
-  private spatialGrid: Map<string, Array<{ type: 'snake' | 'food' | 'specialFood', index: number }>> = new Map();
-  private cellSize: number = 100; // Size of each grid cell
+  private lastFoodSpawn: number = 0;
+  private lastPowerUpSpawn: number = 0; // Track when the last power-up was spawned
+  private foodSpawnRate: number = 100; // ms
+  private powerUpSpawnRate: number = 30000; // Spawn power-ups every 30 seconds
+  private maxPowerUps: number = 3; // Maximum number of power-ups on the map
   
   constructor(width: number, height: number) {
     this.state = createEmptyGameState(width, height);
-    this.worldWidth = width;
-    this.worldHeight = height;
     
     // Initialize food
     this.spawnInitialFood();
@@ -135,26 +114,14 @@ export class GameEngine {
   public addPlayer(name: string): string {
     const id = uuidv4();
     
-    // Spawn player away from edges with a much larger safe area
-    // Increased padding to prevent spawning near danger zones
-    const padding = Math.max(300, BORDER_DANGER_ZONE * 3); // At least 300px or 3x the danger zone
-    
-    // Ensure the spawn point is well within the safe area of the map
+    // Spawn player away from edges
+    const padding = 200;
     const position: Point = {
       x: padding + Math.random() * (this.state.width - padding * 2),
       y: padding + Math.random() * (this.state.height - padding * 2),
     };
     
-    // Debug log to verify spawn location
-    console.log(`Spawning player at: (${position.x}, ${position.y}) with map size: ${this.state.width}x${this.state.height}, safe padding: ${padding}`);
-    
-    // Create new snake with the safe position
     const snake = createSnake(id, name, position);
-    
-    // Set creation timestamp to track play time accurately
-    snake.createdAt = Date.now();
-    
-    // Add to the game
     this.state.snakes.push(snake);
     
     return id;
@@ -227,36 +194,36 @@ export class GameEngine {
     }
   }
   
-  // Add a safety check method to prevent border deaths during the first few seconds
-  private isNewlyCreatedSnake(snake: Snake): boolean {
-    const spawnGracePeriodMs = 2000; // 2 seconds of immunity
-    return (Date.now() - snake.createdAt) < spawnGracePeriodMs;
-  }
-  
   // Main game loop - updates game state
   public update(deltaTime: number): void {
-    // Only update at the tick rate
-    this.lastTick += deltaTime;
-    if (this.lastTick < TICK_RATE) return;
-    this.lastTick = 0;
+    // Spawn food at regular intervals
+    const now = Date.now();
+    
+    if (now - this.lastFoodSpawn > this.foodSpawnRate) {
+      this.spawnFood();
+      this.lastFoodSpawn = now;
+    }
+    
+    // Spawn power-ups at regular intervals
+    if (now - this.lastPowerUpSpawn > this.powerUpSpawnRate) {
+      this.spawnPowerUp();
+      this.lastPowerUpSpawn = now;
+    }
+    
+    // Check for expired power-ups
+    this.checkExpiredPowerUps();
+    
+    // Update snake positions
+    this.updateSnakes(deltaTime);
+    
+    // Check for collisions
+    this.checkCollisions();
     
     // Check boost status
     this.checkBoostStatus();
     
-    // Update snakes
-    this.updateSnakes(deltaTime);
-    
-    // Check collisions
-    this.checkCollisions();
-    
-    // Spawn new food periodically
-    this.foodSpawnCounter += deltaTime;
-    if (this.foodSpawnCounter >= FOOD_SPAWN_INTERVAL) {
-      this.foodSpawnCounter = 0;
-      if (this.state.foods.length < FOOD_COUNT) {
-        this.spawnFood();
-      }
-    }
+    // Check power-up status for all snakes
+    this.checkPowerUpStatus();
     
     // Update leaderboard
     this.updateLeaderboard();
@@ -351,200 +318,100 @@ export class GameEngine {
     }
   }
   
-  // Update the collision detection method to use spatial partitioning
-  private updateSpatialGrid(): void {
-    // Clear the grid
-    this.spatialGrid.clear();
-    
-    // Add snakes to the grid
-    this.state.snakes.forEach((snake, snakeIndex) => {
-      if (!snake.alive) return;
-      
-      snake.segments.forEach(segment => {
-        const cell = getGridCell(segment.x, segment.y, this.cellSize, this.worldWidth, this.worldHeight);
-        const cellKey = `${cell.row},${cell.col}`;
-        
-        if (!this.spatialGrid.has(cellKey)) {
-          this.spatialGrid.set(cellKey, []);
-        }
-        
-        this.spatialGrid.get(cellKey)!.push({ type: 'snake', index: snakeIndex });
-      });
-    });
-    
-    // Add food to the grid
-    this.state.foods.forEach((food, foodIndex) => {
-      const cell = getGridCell(food.position.x, food.position.y, this.cellSize, this.worldWidth, this.worldHeight);
-      const cellKey = `${cell.row},${cell.col}`;
-      
-      if (!this.spatialGrid.has(cellKey)) {
-        this.spatialGrid.set(cellKey, []);
-      }
-      
-      this.spatialGrid.get(cellKey)!.push({ type: 'food', index: foodIndex });
-    });
-    
-    // Add special food to the grid
-    this.state.foods.forEach((food, foodIndex) => {
-      const cell = getGridCell(food.position.x, food.position.y, this.cellSize, this.worldWidth, this.worldHeight);
-      const cellKey = `${cell.row},${cell.col}`;
-      
-      if (!this.spatialGrid.has(cellKey)) {
-        this.spatialGrid.set(cellKey, []);
-      }
-      
-      this.spatialGrid.get(cellKey)!.push({ type: 'specialFood', index: foodIndex });
-    });
-  }
-  
+  // Check for collisions between snakes and food
   private checkCollisions(): void {
-    // First update the spatial grid
-    this.updateSpatialGrid();
-    
-    // Check snake-food collisions more efficiently
-    this.state.snakes.forEach((snake, snakeIndex) => {
-      if (!snake.alive) return;
+    // Check snake-food collisions
+    for (const snake of this.state.snakes) {
+      if (!snake.alive) continue;
       
       const head = snake.segments[0];
-      const headCell = getGridCell(head.x, head.y, this.cellSize, this.worldWidth, this.worldHeight);
-      const cellKey = `${headCell.row},${headCell.col}`;
+      const foodsToRemove: string[] = [];
       
-      // Check for collisions in the current cell and adjacent cells
-      for (let rowOffset = -1; rowOffset <= 1; rowOffset++) {
-        for (let colOffset = -1; colOffset <= 1; colOffset++) {
-          const checkKey = `${headCell.row + rowOffset},${headCell.col + colOffset}`;
-          const cellContents = this.spatialGrid.get(checkKey);
+      // Check collision with food
+      for (const food of this.state.foods) {
+        if (distance(head, food.position) < FOOD_COLLISION_DISTANCE + food.radius) {
+          // Snake eats food
+          snake.score += food.value;
           
-          if (!cellContents) continue;
+          // Add new segments to the snake (growth)
+          const tail = snake.segments[snake.segments.length - 1];
           
-          // Check food collisions
-          cellContents.forEach(item => {
-            if (item.type === 'food') {
-              const food = this.state.foods[item.index];
-              if (food && distance(head, food.position) < 20) {
-                this.handleFoodCollision(snake, item.index);
-              }
-            } else if (item.type === 'specialFood') {
-              const specialFood = this.state.foods[item.index];
-              if (specialFood && distance(head, specialFood.position) < 20) {
-                this.handleSpecialFoodCollision(snake, item.index);
-              }
-            }
-          });
+          // Growth proportional to food value
+          for (let i = 0; i < food.value; i++) {
+            snake.segments.push({ ...tail });
+          }
+          
+          // Update boost meter for special food
+          if (food.value > 2) {
+            // Special food increases boost meter by 25%
+            snake.boostMeter = Math.min(100, snake.boostMeter + 25);
+            this.emitEvent('specialFoodCollect', { 
+              playerId: snake.id, 
+              foodValue: food.value,
+              boostMeter: snake.boostMeter
+            });
+          } else {
+            // Regular food increases boost meter by a tiny amount (5%)
+            snake.boostMeter = Math.min(100, snake.boostMeter + 5);
+            this.emitEvent('foodCollect', { 
+              playerId: snake.id, 
+              foodValue: food.value,
+              boostMeter: snake.boostMeter
+            });
+          }
+          
+          foodsToRemove.push(food.id);
         }
+      }
+      
+      // Remove eaten food
+      if (foodsToRemove.length > 0) {
+        this.state.foods = this.state.foods.filter(
+          food => !foodsToRemove.includes(food.id)
+        );
       }
       
       // Check snake-snake collisions
-      for (let otherSnakeIndex = 0; otherSnakeIndex < this.state.snakes.length; otherSnakeIndex++) {
-        if (otherSnakeIndex === snakeIndex) continue;
+      for (const otherSnake of this.state.snakes) {
+        // Skip self or dead snakes
+        if (snake.id === otherSnake.id || !otherSnake.alive) continue;
         
-        const otherSnake = this.state.snakes[otherSnakeIndex];
-        if (!otherSnake.alive) continue;
-        
-        // Check for collisions with other snakes' segments
-        // Start from index 1 to skip its own head
-        for (let j = 0; j < otherSnake.segments.length; j++) {
-          const segment = otherSnake.segments[j];
-          
-          if (distance(head, segment) < 20) {
-            // Check size advantage for killing other snakes - only if head-to-head
-            if (j === 0 && snake.segments.length > otherSnake.segments.length + 2) {
-              // This snake is larger and gets a kill
-              this.killSnake(snake.id, otherSnake.id);
-              
-              // Award points for kill
-              snake.score += Math.floor(otherSnake.score * 0.5);
-              snake.kills = (snake.kills || 0) + 1;
-              
-              // Emit event for kill
-              this.emitEvent('playerKill', {
-                killerId: snake.id,
-                killerName: snake.name,
-                victimId: otherSnake.id,
-                victimName: otherSnake.name,
-                score: snake.score
-              });
-              
-              continue;
-            }
+        // Check collision with other snake's body (not head)
+        for (let i = 1; i < otherSnake.segments.length; i++) {
+          if (distance(head, otherSnake.segments[i]) < COLLISION_DISTANCE) {
+            // Drop food from the dying snake
+            this.dropFoodFromSnake(snake);
             
-            // Handle head-to-head collision where other snake is larger
-            if (j === 0 && otherSnake.segments.length > snake.segments.length + 2) {
-              this.killSnake(snake.id, otherSnake.id);
-              
-              // Award points to the other snake
-              otherSnake.score += Math.floor(snake.score * 0.5);
-              otherSnake.kills = (otherSnake.kills || 0) + 1;
-              
-              // Emit event for kill
-              this.emitEvent('playerKill', {
-                killerId: otherSnake.id,
-                killerName: otherSnake.name,
-                victimId: snake.id,
-                victimName: snake.name,
-                score: otherSnake.score
-              });
-              
-              return; // This snake is dead, no need to check further
-            }
+            // This snake died by collision
+            snake.alive = false;
             
-            // Normal collision (not head-to-head or no size advantage)
-            if (j > 0 || otherSnake.segments.length <= snake.segments.length + 2) {
-              this.killSnake(snake.id, otherSnake.id);
-              
-              // Award some points to the other snake for the collision
-              otherSnake.score += Math.floor(snake.score * 0.2);
-              otherSnake.kills = (otherSnake.kills || 0) + 1;
-              
-              // Emit event for kill
-              this.emitEvent('playerKill', {
-                killerId: otherSnake.id,
-                killerName: otherSnake.name,
-                victimId: snake.id,
-                victimName: snake.name,
-                score: otherSnake.score
-              });
-              
-              return; // This snake is dead, no need to check further
-            }
+            // Emit death event
+            this.emitEvent('playerDeath', { playerId: snake.id, killedBy: otherSnake.id });
+            
+            // Award points to the snake that was hit
+            otherSnake.score += Math.floor(snake.segments.length / 2);
+            break;
           }
         }
       }
+    }
+    
+    // Check if snakes collide with power-ups
+    this.state.snakes.forEach(snake => {
+      if (!snake.alive) return;
       
-      // Check self collision (only if snake has more than 4 segments)
-      if (snake.segments.length > 4) {
-        for (let j = 3; j < snake.segments.length; j++) {
-          const segment = snake.segments[j];
-          if (distance(head, segment) < 15) {
-            this.killSnake(snake.id);
-            return; // No need to check further, this snake is dead
-          }
-        }
-      }
+      const head = snake.segments[0];
+      const headRadius = 12 * (snake.scale || 1);
       
-      // Check world boundary collision - add grace period for newly spawned snakes
-      const isOutOfBounds = head.x < 0 || head.x >= this.worldWidth || head.y < 0 || head.y >= this.worldHeight;
-      if (isOutOfBounds) {
-        // Add grace period - don't kill newly created snakes due to border collisions
-        if (this.isNewlyCreatedSnake(snake)) {
-          console.log(`Protecting newly spawned snake ${snake.id} from border death`);
-          
-          // Move the snake back into bounds if it went outside
-          if (head.x < 0) head.x = 50;
-          if (head.x >= this.worldWidth) head.x = this.worldWidth - 50;
-          if (head.y < 0) head.y = 50;
-          if (head.y >= this.worldHeight) head.y = this.worldHeight - 50;
-          
-          // Adjust direction away from border
-          snake.direction = {
-            x: snake.direction.x * (head.x < this.worldWidth/2 ? 1 : -1),
-            y: snake.direction.y * (head.y < this.worldHeight/2 ? 1 : -1)
-          };
-        } else {
-          this.killSnake(snake.id, null, 'border');
-          return; // No need to check further
+      // Check collision with power-ups
+      this.state.powerUps = this.state.powerUps.filter(powerUp => {
+        if (distance(head, powerUp.position) < headRadius + powerUp.radius) {
+          // Apply power-up effect
+          this.applyPowerUpEffect(snake, powerUp.type);
+          return false;
         }
-      }
+        return true;
+      });
     });
   }
   
@@ -581,92 +448,193 @@ export class GameEngine {
     return playerIndex >= 0 ? playerIndex + 1 : 0;
   }
 
-  // Add methods for handling food collisions
-  private handleFoodCollision(snake: Snake, foodIndex: number): void {
-    const food = this.state.foods[foodIndex];
-    if (!food) return;
-    
-    // Snake eats food
-    snake.score += food.value;
-    
-    // Add new segments to the snake (growth)
-    const tail = snake.segments[snake.segments.length - 1];
-    
-    // Growth proportional to food value
-    for (let i = 0; i < food.value; i++) {
-      snake.segments.push({ ...tail });
-    }
-    
-    // Regular food increases boost meter by a tiny amount (5%)
-    snake.boostMeter = Math.min(100, snake.boostMeter + 5);
-    this.emitEvent('foodCollect', { 
-      playerId: snake.id, 
-      foodValue: food.value,
-      boostMeter: snake.boostMeter
-    });
-    
-    // Remove the food
-    this.state.foods = this.state.foods.filter((_, index) => index !== foodIndex);
-  }
-  
-  private handleSpecialFoodCollision(snake: Snake, foodIndex: number): void {
-    const food = this.state.foods[foodIndex];
-    if (!food || food.value <= 2) return; // Only special food has value > 2
-    
-    // Snake eats special food
-    snake.score += food.value;
-    
-    // Add new segments to the snake (growth)
-    const tail = snake.segments[snake.segments.length - 1];
-    
-    // Growth proportional to food value
-    for (let i = 0; i < food.value; i++) {
-      snake.segments.push({ ...tail });
-    }
-    
-    // Special food increases boost meter by 25%
-    snake.boostMeter = Math.min(100, snake.boostMeter + 25);
-    this.emitEvent('specialFoodCollect', { 
-      playerId: snake.id, 
-      foodValue: food.value,
-      boostMeter: snake.boostMeter
-    });
-    
-    // Remove the food
-    this.state.foods = this.state.foods.filter((_, index) => index !== foodIndex);
-  }
-  
-  // Fix the killSnake method to handle the cause parameter
-  private killSnake(snakeId: string, killedById: string | null = null, cause: string = ''): void {
-    const snake = this.state.snakes.find(s => s.id === snakeId);
+  private killSnake(index: number, killer?: Snake): void {
+    const snake = this.state.snakes[index];
     if (!snake || !snake.alive) return;
     
-    // Drop food from the dying snake
-    this.dropFoodFromSnake(snake);
-    
-    // Mark the snake as dead
+    // Set snake to dead
     snake.alive = false;
     
-    // Calculate play time in seconds - use snake.startTime if available
-    const startTime = (snake as any).createdAt || (snake as any).startTime || Date.now();
-    const playTimeSeconds = Math.floor((Date.now() - startTime) / 1000);
-    
-    // Emit appropriate death event
-    if (cause === 'border') {
-      this.emitEvent('playerDeathBorder', { 
-        playerId: snakeId,
-        position: this.getPlayerRank(snakeId),
-        score: snake.score,
-        playTime: playTimeSeconds
-      });
-    } else {
-      this.emitEvent('playerDeath', { 
-        playerId: snakeId, 
-        killedBy: killedById,
-        position: this.getPlayerRank(snakeId),
-        score: snake.score,
-        playTime: playTimeSeconds
+    // If there's a killer, increment their score based on the dead snake's length
+    if (killer && killer.id !== snake.id) {
+      const scoreGain = Math.floor(snake.segments.length * 10);
+      killer.score += scoreGain;
+      killer.kills += 1; // Increment kill count
+      killer.lastKill = snake.id; // Track the last player killed
+      
+      // Create a kill event
+      this.emitEvent('playerKill', { 
+        playerId: killer.id, 
+        killedId: snake.id,
+        scoreGain,
+        at: { 
+          x: snake.segments[0].x, 
+          y: snake.segments[0].y 
+        }
       });
     }
+    
+    // Convert snake segments to food particles and add them to the state
+    for (let i = 0; i < snake.segments.length; i++) {
+      if (i % 3 === 0) { // Only create food for every 3rd segment to reduce lag
+        this.state.foods.push({
+          id: `food-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          position: { x: snake.segments[i].x, y: snake.segments[i].y },
+          value: 1,
+          color: snake.color,
+          radius: 3,
+          glowIntensity: 0.5
+        });
+      }
+    }
+    
+    // Create death event
+    this.emitEvent('playerDeath', { 
+      playerId: snake.id,
+      at: { 
+        x: snake.segments[0].x, 
+        y: snake.segments[0].y 
+      },
+      killerId: killer?.id
+    });
+  }
+
+  // Spawn a new power-up
+  private spawnPowerUp(): void {
+    // Don't spawn if we're at the maximum
+    if (this.state.powerUps.length >= this.maxPowerUps) {
+      return;
+    }
+    
+    // Random position, avoiding snake positions
+    const position = this.getRandomPosition();
+    
+    // Create a new power-up
+    const powerUp = createPowerUp(uuidv4(), position);
+    
+    // Add to game state
+    this.state.powerUps.push(powerUp);
+  }
+  
+  // Check for expired power-ups and remove them
+  private checkExpiredPowerUps(): void {
+    const now = Date.now();
+    this.state.powerUps = this.state.powerUps.filter(powerUp => {
+      if (now > powerUp.expiryTime) {
+        this.emitEvent('powerUpExpire', { powerUpId: powerUp.id, type: powerUp.type });
+        return false;
+      }
+      return true;
+    });
+  }
+  
+  // Check and update power-up status for all snakes
+  private checkPowerUpStatus(): void {
+    const now = Date.now();
+    
+    this.state.snakes.forEach(snake => {
+      if (!snake.alive) return;
+      
+      // Filter out expired power-ups
+      snake.activePowerUps = snake.activePowerUps.filter(powerUp => {
+        if (now >= powerUp.endTime) {
+          // Emit event when power-up expires
+          this.emitEvent('powerUpExpire', { 
+            playerId: snake.id, 
+            type: powerUp.type 
+          });
+          return false;
+        }
+        return true;
+      });
+    });
+  }
+  
+  // Apply power-up effects to a snake
+  private applyPowerUpEffect(snake: Snake, type: PowerUpType): void {
+    const now = Date.now();
+    const duration = 10000; // 10 seconds
+    
+    // Remove existing power-up of the same type
+    snake.activePowerUps = snake.activePowerUps.filter(p => p.type !== type);
+    
+    // Add the new power-up
+    snake.activePowerUps.push({
+      type,
+      endTime: now + duration
+    });
+    
+    // Special immediate effects
+    switch (type) {
+      case 'giant':
+        // Make the snake bigger temporarily
+        snake.scale = (snake.scale || 1) * 1.5;
+        break;
+      case 'shield':
+        // Shield effects are handled during collision
+        break;
+      case 'ghost':
+        // Ghost effects are handled during collision
+        break;
+      case 'magnet':
+        // Magnet effects are handled during movement
+        break;
+    }
+    
+    // Emit event
+    this.emitEvent('powerUpCollect', {
+      playerId: snake.id,
+      type: type,
+      duration: duration
+    });
+  }
+
+  // Handle snake-to-snake collisions with power-up effects
+  private handleSnakeCollision(snake1: Snake, snake2: Snake): boolean {
+    // Check if snake has a ghost power-up
+    const hasGhost = snake1.activePowerUps.some(p => p.type === 'ghost');
+    if (hasGhost) {
+      return false; // Ghost snakes pass through others
+    }
+    
+    // Check if snake has a shield power-up
+    const hasShield = snake1.activePowerUps.some(p => p.type === 'shield');
+    if (hasShield) {
+      // Shield prevents death but is consumed
+      snake1.activePowerUps = snake1.activePowerUps.filter(p => p.type !== 'shield');
+      return false;
+    }
+    
+    return true; // Normal collision
+  }
+
+  // Get a random position that's not too close to any snake
+  private getRandomPosition(): Point {
+    const margin = 50; // Margin from world edges
+    const minDistFromSnake = 100; // Minimum distance from any snake
+    
+    let position: Point;
+    let isTooClose = true;
+    let attempts = 0;
+    
+    // Try to find a position that's not too close to any snake
+    do {
+      position = {
+        x: margin + Math.random() * (this.state.width - 2 * margin),
+        y: margin + Math.random() * (this.state.height - 2 * margin)
+      };
+      
+      // Check distance from all snakes
+      isTooClose = this.state.snakes.some(snake => {
+        if (!snake.alive) return false;
+        return snake.segments.some(segment => {
+          return distance(segment, position) < minDistFromSnake;
+        });
+      });
+      
+      attempts++;
+    } while (isTooClose && attempts < 10); // Limit attempts to avoid infinite loop
+    
+    return position;
   }
 } 

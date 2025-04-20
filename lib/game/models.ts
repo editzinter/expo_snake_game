@@ -5,6 +5,26 @@ export interface Point {
   y: number;
 }
 
+// PowerUp types that can be collected
+export type PowerUpType = "shield" | "magnet" | "ghost" | "giant";
+
+// PowerUp item that appears on the map
+export interface PowerUp {
+  id: string;
+  position: Point;
+  type: PowerUpType;
+  radius: number;
+  duration: number; // Duration in milliseconds
+  spawnTime: number; // When it was spawned
+  expiryTime: number; // When it disappears if not collected
+}
+
+// Active power-up effect on a snake
+export interface ActivePowerUp {
+  type: PowerUpType;
+  endTime: number; // When the effect ends
+}
+
 export interface Snake {
   id: string;
   name: string;
@@ -25,7 +45,7 @@ export interface Snake {
   boostEndTime: number; // Timestamp when boost will end
   kills: number; // Add kill tracking for multiplayer
   lastKill?: string; // Keep track of the last player killed
-  createdAt: number; // Add this line to track when the snake was created
+  activePowerUps: ActivePowerUp[]; // Currently active power-ups
 }
 
 export interface Food {
@@ -44,6 +64,7 @@ export interface GameState {
   height: number;
   snakes: Snake[];
   foods: Food[];
+  powerUps: PowerUp[]; // Power-ups on the map
   leaderboard: {
     id: string;
     name: string;
@@ -131,7 +152,7 @@ export function createSnake(id: string, name: string, position: Point): Snake {
     boostEndTime: 0,
     kills: 0,
     lastKill: undefined,
-    createdAt: Date.now()
+    activePowerUps: [] // Initialize with no active power-ups
   };
 }
 
@@ -163,12 +184,29 @@ export function createFood(id: string, position: Point): Food {
   };
 }
 
+// Create a new power-up
+export function createPowerUp(id: string, position: Point): PowerUp {
+  const types: PowerUpType[] = ["shield", "magnet", "ghost", "giant"];
+  const type = types[Math.floor(Math.random() * types.length)];
+  
+  return {
+    id,
+    position,
+    type,
+    radius: 10, // Power-ups are larger than regular food
+    duration: 10000, // 10 seconds duration when collected
+    spawnTime: Date.now(),
+    expiryTime: Date.now() + 30000 // Disappears after 30 seconds if not collected
+  };
+}
+
 export function createEmptyGameState(width: number, height: number): GameState {
   return {
     width,
     height,
     snakes: [],
     foods: [],
+    powerUps: [], // Initialize empty power-ups array
     leaderboard: [],
   };
 } 

@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { useTheme } from "next-themes";
 import { GameEngine } from "@/lib/game/engine";
-import { GameRenderer } from "@/components/game/GameRenderer";
+import { GameRenderer } from "./GameRenderer";
 import { Snake, PlayerInput, GameState } from "@/lib/game/models";
 import { v4 as uuidv4 } from "uuid";
 import { gameSocketClient } from "@/lib/game/socket-client";
@@ -12,10 +12,14 @@ import SoundControl from "./SoundControl";
 import { GameEventType } from '@/lib/game/engine';
 import { gameStatsClient, GameStats, testDatabaseConnection, displayStats } from "@/lib/game/stats-client";
 import { createBrowserClient } from "@supabase/ssr";
-import { Users } from "lucide-react";
+import { Users, X, Info, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from "lucide-react";
 import Leaderboard from './Leaderboard';
 import ChatBox from './ChatBox';
-import PointerLockManager, { usePointerLock } from './PointerLockManager';
+import GameHeader from "./GameHeader";
+import { useRouter } from "next/navigation";
+import { createClientComponentClient } from "@/utils/supabase-browser";
+import { Socket } from "socket.io-client";
+import { GameSocketClient } from "@/lib/game/socket-client";
 
 interface GameCanvasProps {
   width?: number;
@@ -28,6 +32,114 @@ interface GameCanvasProps {
 const MAP_WIDTH = 6000; // Larger map for more exploration
 const MAP_HEIGHT = 6000;
 
+// Tutorial Overlay Component
+const TutorialOverlay = ({ onClose }: { onClose: () => void }) => {
+  return (
+    <div className="absolute inset-0 bg-black/70 z-50 flex items-center justify-center">
+      <div className="bg-gray-900 rounded-xl shadow-xl p-6 max-w-2xl w-full mx-4 relative">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-gray-400 hover:text-white"
+        >
+          <X size={24} />
+        </button>
+        
+        <div className="text-center mb-6">
+          <h2 className="text-2xl font-bold text-white mb-2">
+            <span className="bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-purple-500">
+              Snake.io Tutorial
+            </span>
+          </h2>
+          <p className="text-gray-300">Master the basics and dominate the arena!</p>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-gray-800/70 p-4 rounded-lg">
+            <h3 className="text-purple-400 text-lg font-semibold mb-2">Movement</h3>
+            <div className="flex justify-center gap-2 mb-4">
+              <div className="w-10 h-10 bg-gray-700 rounded flex items-center justify-center">
+                <ArrowUp size={20} className="text-white" />
+              </div>
+              <div className="w-10 h-10 bg-gray-700 rounded flex items-center justify-center">
+                <ArrowLeft size={20} className="text-white" />
+              </div>
+              <div className="w-10 h-10 bg-gray-700 rounded flex items-center justify-center">
+                <ArrowDown size={20} className="text-white" />
+              </div>
+              <div className="w-10 h-10 bg-gray-700 rounded flex items-center justify-center">
+                <ArrowRight size={20} className="text-white" />
+              </div>
+            </div>
+            <p className="text-gray-300 text-sm">
+              Use arrow keys or WASD to control your snake. You can also use mouse movement in single-player mode.
+            </p>
+          </div>
+          
+          <div className="bg-gray-800/70 p-4 rounded-lg">
+            <h3 className="text-cyan-400 text-lg font-semibold mb-2">Boost Speed</h3>
+            <div className="flex justify-center mb-4">
+              <div className="px-4 py-2 bg-gray-700 rounded text-white text-sm">
+                Space
+              </div>
+            </div>
+            <p className="text-gray-300 text-sm">
+              Press Space when your boost meter is full for a temporary speed boost!
+              Collect food to charge your boost meter.
+            </p>
+          </div>
+          
+          <div className="bg-gray-800/70 p-4 rounded-lg">
+            <h3 className="text-amber-400 text-lg font-semibold mb-2">Power-ups</h3>
+            <div className="flex justify-center gap-2 mb-4">
+              <div className="w-8 h-8 bg-blue-500/50 rounded-full flex items-center justify-center">
+                🛡️
+              </div>
+              <div className="w-8 h-8 bg-purple-500/50 rounded-full flex items-center justify-center">
+                🧲
+              </div>
+              <div className="w-8 h-8 bg-gray-500/50 rounded-full flex items-center justify-center">
+                👻
+              </div>
+              <div className="w-8 h-8 bg-orange-500/50 rounded-full flex items-center justify-center">
+                🔱
+              </div>
+            </div>
+            <p className="text-gray-300 text-sm">
+              Collect special power-ups for temporary abilities:
+              Shield (protection), Magnet (attract food), Ghost (pass through), and Giant (size increase).
+            </p>
+          </div>
+          
+          <div className="bg-gray-800/70 p-4 rounded-lg">
+            <h3 className="text-green-400 text-lg font-semibold mb-2">Grow & Survive</h3>
+            <p className="text-gray-300 text-sm mb-2">
+              • Eat food to grow longer and gain points
+            </p>
+            <p className="text-gray-300 text-sm mb-2">
+              • Avoid hitting other snakes or the borders
+            </p>
+            <p className="text-gray-300 text-sm">
+              • Try to trap opponents by circling around them
+            </p>
+          </div>
+        </div>
+        
+        <div className="mt-6 text-center">
+          <button
+            onClick={onClose}
+            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full font-medium transition-colors"
+          >
+            Got it!
+          </button>
+          <div className="mt-4 text-gray-400 text-xs">
+            Use the <Info size={12} className="inline" /> button to show this tutorial again at any time.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const GameCanvas = ({ 
   width = 800, 
   height = 600,
@@ -35,7 +147,6 @@ const GameCanvas = ({
   forceOnlineMode = false
 }: GameCanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { theme } = useTheme();
   const [isInitialized, setIsInitialized] = useState(false);
   const [gameEngine, setGameEngine] = useState<GameEngine | null>(null);
@@ -56,17 +167,7 @@ const GameCanvas = ({
   const [showChat, setShowChat] = useState(false);
   const [playerCount, setPlayerCount] = useState(0);
   const [killFeed, setKillFeed] = useState<{message: string, timestamp: number, isError?: boolean, animateClass?: string}[]>([]);
-  const [isGameOver, setIsGameOver] = useState(false);
-  const [finalStats, setFinalStats] = useState<{
-    score: number,
-    kills?: number,
-    position?: number,
-    playTime?: number,
-    snakeLength?: number
-  } | null>(null);
-  
-  // Use the pointer lock hook
-  const { isLocked: isPointerLocked, exitLock: exitPointerLock } = usePointerLock();
+  const [showTutorial, setShowTutorial] = useState(false);
   
   // Update canvas size on window resize - use the entire viewport
   useEffect(() => {
@@ -197,144 +298,7 @@ const GameCanvas = ({
       
       clearTimeout(controlsTimer);
     };
-  }, [playerName, forceOnlineMode, theme]);
-
-  // Handle mouse/touch controls with improved pointer lock support
-  useEffect(() => {
-    if (!isInitialized) return;
-    if (!canvasRef.current || !playerId) return;
-    
-    const canvas = canvasRef.current;
-    
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isGameOver) return;
-      
-      // Show controls temporarily when mouse moves
-      setShowControls(true);
-      
-      // Clear previous timeout if it exists
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-      
-      // Set new timeout
-      controlsTimeoutRef.current = setTimeout(() => {
-        setShowControls(false);
-      }, 3000);
-      
-      // Get player snake
-      let playerSnake: Snake | undefined;
-      
-      if (isOnlineMode && gameState) {
-        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
-      } else if (gameEngine) {
-        const state = gameEngine.getState();
-        playerSnake = state.snakes.find(snake => snake.id === playerId);
-      }
-      
-      if (!playerSnake || !playerSnake.alive) return;
-      
-      // Get canvas rect
-      const rect = canvas.getBoundingClientRect();
-      
-      // Calculate direction based on pointer lock mode
-      let direction;
-      
-      if (isPointerLocked) {
-        // Use movementX and movementY for pointer lock mode (more precise control)
-        direction = {
-          x: e.movementX,
-          y: e.movementY
-        };
-      } else {
-        // Get mouse position relative to canvas
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-        
-        // Calculate direction from snake head to mouse position
-        direction = {
-          x: mouseX - canvas.width / 2,
-          y: mouseY - canvas.height / 2,
-        };
-      }
-      
-      // Normalize direction for consistent movement speed
-      const magnitude = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
-      if (magnitude > 0) {
-        direction.x /= magnitude;
-        direction.y /= magnitude;
-        
-        // Update player direction
-        if (isOnlineMode) {
-          // Send direction to server
-          gameSocketClient.sendInput(direction);
-        } else if (gameEngine) {
-          // Update local game engine
-          const input: PlayerInput = {
-            id: playerId,
-            direction,
-          };
-          gameEngine.handlePlayerInput(input);
-        }
-      }
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      e.preventDefault();
-      const canvas = canvasRef.current;
-      if (!canvas || e.touches.length === 0) return;
-      
-      // Show controls temporarily
-      setShowControls(true);
-      
-      // Get touch position
-      const rect = canvas.getBoundingClientRect();
-      const touchX = e.touches[0].clientX - rect.left;
-      const touchY = e.touches[0].clientY - rect.top;
-      
-      // Get player snake
-      let playerSnake: Snake | undefined;
-      
-      if (isOnlineMode && gameState) {
-        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
-      } else if (gameEngine) {
-        const state = gameEngine.getState();
-        playerSnake = state.snakes.find(snake => snake.id === playerId);
-      }
-      
-      if (!playerSnake || !playerSnake.alive) return;
-      
-      // Calculate direction from center to touch position
-      const direction = {
-        x: touchX - canvas.width / 2,
-        y: touchY - canvas.height / 2,
-      };
-      
-      // Update player direction
-      if (isOnlineMode) {
-        gameSocketClient.sendInput(direction);
-      } else if (gameEngine) {
-        const input: PlayerInput = {
-          id: playerId,
-          direction,
-        };
-        gameEngine.handlePlayerInput(input);
-      }
-    };
-
-    // Add event listeners
-    canvas.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
-    
-    // Clean up event listeners
-    return () => {
-      canvas.removeEventListener("mousemove", handleMouseMove);
-      canvas.removeEventListener("touchmove", handleTouchMove);
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-    };
-  }, [isInitialized, playerId, isOnlineMode, gameEngine, gameState, isPointerLocked, isGameOver]);
+  }, [playerName, forceOnlineMode]);
 
   // Update canvas size when window resizes
   useEffect(() => {
@@ -505,6 +469,121 @@ const GameCanvas = ({
       }
     };
   }, [zoom, gameRenderer]);
+
+  // Handle mouse/touch controls
+  useEffect(() => {
+    if (!isInitialized) return;
+    if (!gameEngine && !isOnlineMode) return;
+    if (!playerId) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      // Show controls temporarily when mouse moves
+      setShowControls(true);
+      
+      // Hide controls after 3 seconds
+      const controlsTimer = setTimeout(() => {
+        setShowControls(false);
+      }, 3000);
+
+      // Get mouse position relative to canvas
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      // Get player snake
+      let playerSnake: Snake | undefined;
+      
+      if (isOnlineMode && gameState) {
+        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
+      } else if (gameEngine) {
+        const state = gameEngine.getState();
+        playerSnake = state.snakes.find(snake => snake.id === playerId);
+      }
+      
+      if (!playerSnake || !playerSnake.alive) return;
+
+      // Calculate direction from snake head to mouse position
+      const head = playerSnake.segments[0];
+      const direction = {
+        x: mouseX - canvas.width / 2,
+        y: mouseY - canvas.height / 2,
+      };
+
+      // Update player direction
+      if (isOnlineMode) {
+        // Send direction to server
+        gameSocketClient.sendInput(direction);
+      } else if (gameEngine) {
+        // Update local game engine
+        const input: PlayerInput = {
+          id: playerId,
+          direction,
+        };
+        gameEngine.handlePlayerInput(input);
+      }
+      
+      return () => clearTimeout(controlsTimer);
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      const canvas = canvasRef.current;
+      if (!canvas || e.touches.length === 0) return;
+      
+      // Show controls temporarily
+      setShowControls(true);
+      
+      // Get touch position
+      const rect = canvas.getBoundingClientRect();
+      const touchX = e.touches[0].clientX - rect.left;
+      const touchY = e.touches[0].clientY - rect.top;
+      
+      // Get player snake
+      let playerSnake: Snake | undefined;
+      
+      if (isOnlineMode && gameState) {
+        playerSnake = gameState.snakes.find(snake => snake.id === playerId);
+      } else if (gameEngine) {
+        const state = gameEngine.getState();
+        playerSnake = state.snakes.find(snake => snake.id === playerId);
+      }
+      
+      if (!playerSnake || !playerSnake.alive) return;
+      
+      // Calculate direction from center to touch position
+      const direction = {
+        x: touchX - canvas.width / 2,
+        y: touchY - canvas.height / 2,
+      };
+      
+      // Update player direction
+      if (isOnlineMode) {
+        gameSocketClient.sendInput(direction);
+      } else if (gameEngine) {
+        const input: PlayerInput = {
+          id: playerId,
+          direction,
+        };
+        gameEngine.handlePlayerInput(input);
+      }
+    };
+
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.addEventListener("mousemove", handleMouseMove);
+      canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
+    }
+
+    return () => {
+      if (canvas) {
+        canvas.removeEventListener("mousemove", handleMouseMove);
+        canvas.removeEventListener("touchmove", handleTouchMove);
+      }
+    };
+  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState]);
 
   // Store the start time in state and localStorage when game is initialized
   useEffect(() => {
@@ -885,17 +964,11 @@ const GameCanvas = ({
     }
   }, [playerId, gameEngine]);
 
-  // Handle player death event with improved cleanup and UI
+  // Handle player death event
   const handlePlayerDeath = () => {
     if (!playerId || !gameStartTime) return;
     
     console.log("handlePlayerDeath called");
-    
-    // Exit pointer lock when player dies
-    exitPointerLock();
-    
-    // Set game over state
-    setIsGameOver(true);
     
     // First, test database connection 
     testDatabaseConnection().then(result => {
@@ -904,17 +977,17 @@ const GameCanvas = ({
     
     // Get the player's final stats
     let finalState;
-    let currentPlayerSnake;
+    let playerSnake;
     
     if (isOnlineMode && gameState) {
       finalState = gameState;
-      currentPlayerSnake = finalState.snakes.find(s => s.id === playerId);
+      playerSnake = finalState.snakes.find(s => s.id === playerId);
     } else if (gameEngine) {
       finalState = gameEngine.getState();
-      currentPlayerSnake = finalState.snakes.find(s => s.id === playerId);
+      playerSnake = finalState.snakes.find(s => s.id === playerId);
     }
     
-    if (!currentPlayerSnake) {
+    if (!playerSnake) {
       console.error("Player snake not found!");
       return;
     }
@@ -924,23 +997,13 @@ const GameCanvas = ({
     
     // Prepare stats object
     const stats: GameStats = {
-      score: currentPlayerSnake.score,
-      snakeLength: currentPlayerSnake.segments.length,
+      score: playerSnake.score,
+      snakeLength: playerSnake.segments.length,
       position: finalState && finalState.leaderboard 
         ? finalState.leaderboard.findIndex(entry => entry.id === playerId) + 1 
         : undefined,
-      playTime: playTimeSeconds,
-      kills: currentPlayerSnake.kills || 0
+      playTime: playTimeSeconds
     };
-    
-    // Save final stats for display
-    setFinalStats({
-      score: currentPlayerSnake.score,
-      kills: currentPlayerSnake.kills || 0,
-      position: stats.position,
-      playTime: playTimeSeconds,
-      snakeLength: currentPlayerSnake.segments.length
-    });
     
     console.log("Recording death stats:", stats);
     
@@ -968,15 +1031,6 @@ const GameCanvas = ({
       .catch(err => {
         console.error("Error recording death stats:", err);
       });
-  };
-
-  // Function to restart the game after death
-  const handleRestartGame = () => {
-    setIsGameOver(false);
-    setFinalStats(null);
-    
-    // Reload the page to restart the game completely
-    window.location.reload();
   };
 
   // Function to test database connection
@@ -1157,15 +1211,48 @@ const GameCanvas = ({
     }
   }, [isOnlineMode, gameState]);
 
-  return (
-    <PointerLockManager disabled={isGameOver}>
-      <div className="relative w-full h-full overflow-hidden">
-        <canvas
-          ref={canvasRef}
-          className="absolute inset-0 bg-zinc-900 dark:bg-zinc-950 w-full h-full"
-          style={{ cursor: isPointerLocked ? 'none' : 'default' }} // Only hide cursor when pointer is locked
-        />
+  // Show tutorial for first-time players
+  useEffect(() => {
+    const hasSeen = localStorage.getItem('hasTutorialBeenSeen');
+    if (!hasSeen) {
+      setShowTutorial(true);
+      localStorage.setItem('hasTutorialBeenSeen', 'true');
+    }
+  }, []);
 
+  // Add a method to toggle tutorial
+  const toggleTutorial = useCallback(() => {
+    setShowTutorial(prev => !prev);
+  }, []);
+
+  return (
+    <div className="w-full h-full flex flex-col relative overflow-hidden">
+      {/* Header with player name */}
+      <GameHeader 
+        onNameChange={handleNameChange} 
+        initialName={playerName}
+        isMultiplayer={isOnlineMode || forceOnlineMode}
+      />
+      
+      {/* Tutorial toggle button */}
+      <button 
+        onClick={toggleTutorial}
+        className="absolute top-20 right-4 z-10 bg-indigo-800/40 hover:bg-indigo-700/60 text-white rounded-full p-2"
+        title="Show Tutorial"
+      >
+        <Info size={16} />
+      </button>
+      
+      {/* Game canvas */}
+      <div className="flex-1 relative">
+        <canvas 
+          ref={canvasRef} 
+          className="w-full h-full" 
+        />
+        
+        {/* Show tutorial overlay */}
+        {showTutorial && <TutorialOverlay onClose={() => setShowTutorial(false)} />}
+        
         {/* Multiplayer components - only show when in multiplayer mode */}
         {(isOnlineMode || forceOnlineMode) && (
           <>
@@ -1234,56 +1321,16 @@ const GameCanvas = ({
         )}
         
         {/* Show game controls helper */}
-        {showControls && !isGameOver && (
+        {showControls && (
           <div className="absolute bottom-4 left-4 px-4 py-3 rounded-lg bg-black/50 backdrop-blur-sm transition-opacity duration-300">
             <div className="text-xs text-white">
               <p className="font-semibold mb-1">Controls:</p>
               <ul className="text-gray-300 space-y-1">
-                <li>• Mouse: Move snake {!isPointerLocked && "(Click game to lock mouse)"}</li>
+                <li>• Mouse: Move snake</li>
                 <li>• Scroll: Zoom in/out</li>
                 <li>• Space: Activate boost (when meter is full)</li>
                 <li>• Click: Restart (when dead)</li>
               </ul>
-            </div>
-          </div>
-        )}
-        
-        {/* Game Over Stats UI */}
-        {isGameOver && finalStats && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-20">
-            <div className="bg-slate-800 border-2 border-red-500 rounded-lg p-6 max-w-md w-full shadow-lg transform animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <h2 className="text-3xl font-bold text-center text-red-500 mb-6">Game Over</h2>
-                
-              <div className="grid grid-cols-2 gap-6 mb-6">
-                <div className="bg-slate-900 p-4 rounded-lg text-center">
-                  <p className="text-gray-400 text-sm mb-1">Score</p>
-                  <p className="text-2xl font-bold text-white">{finalStats.score}</p>
-                </div>
-                  
-                <div className="bg-slate-900 p-4 rounded-lg text-center">
-                  <p className="text-gray-400 text-sm mb-1">Length</p>
-                  <p className="text-2xl font-bold text-white">{finalStats.snakeLength}</p>
-                </div>
-                  
-                <div className="bg-slate-900 p-4 rounded-lg text-center">
-                  <p className="text-gray-400 text-sm mb-1">Kills</p>
-                  <p className="text-2xl font-bold text-white">{finalStats.kills || 0}</p>
-                </div>
-                  
-                <div className="bg-slate-900 p-4 rounded-lg text-center">
-                  <p className="text-gray-400 text-sm mb-1">{finalStats.position ? "Rank" : "Play Time"}</p>
-                  <p className="text-2xl font-bold text-white">
-                    {finalStats.position ? `#${finalStats.position}` : `${Math.floor(finalStats.playTime! / 60)}:${(finalStats.playTime! % 60).toString().padStart(2, '0')}`}
-                  </p>
-                </div>
-              </div>
-                
-              <button 
-                onClick={handleRestartGame}
-                className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition-colors duration-200"
-              >
-                Play Again
-              </button>
             </div>
           </div>
         )}
@@ -1368,7 +1415,7 @@ const GameCanvas = ({
         {/* Sound control */}
         <SoundControl />
       </div>
-    </PointerLockManager>
+    </div>
   );
 };
 

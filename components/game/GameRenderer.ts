@@ -1,4 +1,11 @@
-import { GameState, Snake, Food, Point } from "@/lib/game/models";
+import { 
+  GameState, 
+  Snake, 
+  Food, 
+  Point,
+  PowerUp,
+  PowerUpType
+} from "../../lib/game/models";
 import { TrailSystem } from "../../lib/game/trail";
 
 export class GameRenderer {
@@ -621,7 +628,7 @@ export class GameRenderer {
   }
 
   // Draw a game over message
-  public drawGameOver(score: number, stats?: { length: number, kills?: number, position?: number }): void {
+  public drawGameOver(score: number): void {
     // Semi-transparent overlay
     this.ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
     this.ctx.fillRect(0, 0, this.screenWidth, this.screenHeight);
@@ -630,9 +637,9 @@ export class GameRenderer {
     this.ctx.fillStyle = "rgba(5, 5, 21, 0.8)";
     this.ctx.fillRect(
       this.screenWidth / 2 - 200,
-      this.screenHeight / 2 - 150,
+      this.screenHeight / 2 - 100,
       400,
-      300
+      200
     );
     
     // Glow border
@@ -642,9 +649,9 @@ export class GameRenderer {
     this.ctx.lineWidth = 3;
     this.ctx.strokeRect(
       this.screenWidth / 2 - 200,
-      this.screenHeight / 2 - 150,
+      this.screenHeight / 2 - 100,
       400,
-      300
+      200
     );
     
     // Title with glow
@@ -656,54 +663,19 @@ export class GameRenderer {
     this.ctx.fillText(
       "Game Over",
       this.screenWidth / 2,
-      this.screenHeight / 2 - 100
+      this.screenHeight / 2 - 40
     );
 
     // Score with glow
-    this.ctx.font = "26px Arial";
+    this.ctx.font = "24px Arial";
     this.ctx.fillStyle = "#FFFFFF";
     this.ctx.shadowBlur = 5;
     this.ctx.shadowColor = "#FFFFFF";
     this.ctx.fillText(
-      `Score: ${score}`,
+      `Your score: ${score}`,
       this.screenWidth / 2,
-      this.screenHeight / 2 - 40
+      this.screenHeight / 2 + 10
     );
-
-    // Additional stats if provided
-    if (stats) {
-      this.ctx.font = "20px Arial";
-      this.ctx.fillStyle = "#DDDDDD";
-      this.ctx.shadowBlur = 3;
-      
-      const yStart = this.screenHeight / 2;
-      const lineHeight = 35;
-      let currentY = yStart;
-      
-      this.ctx.fillText(
-        `Length: ${stats.length}`,
-        this.screenWidth / 2,
-        currentY
-      );
-      currentY += lineHeight;
-      
-      if (stats.kills !== undefined) {
-        this.ctx.fillText(
-          `Kills: ${stats.kills}`,
-          this.screenWidth / 2,
-          currentY
-        );
-        currentY += lineHeight;
-      }
-      
-      if (stats.position !== undefined) {
-        this.ctx.fillText(
-          `Position: ${stats.position}${this.getOrdinalSuffix(stats.position)}`,
-          this.screenWidth / 2,
-          currentY
-        );
-      }
-    }
 
     // Instruction
     this.ctx.font = "18px Arial";
@@ -712,24 +684,8 @@ export class GameRenderer {
     this.ctx.fillText(
       "Click to play again",
       this.screenWidth / 2,
-      this.screenHeight / 2 + 120
+      this.screenHeight / 2 + 60
     );
-  }
-  
-  // Helper function to get ordinal suffix
-  private getOrdinalSuffix(i: number): string {
-    const j = i % 10,
-          k = i % 100;
-    if (j == 1 && k != 11) {
-      return "st";
-    }
-    if (j == 2 && k != 12) {
-      return "nd";
-    }
-    if (j == 3 && k != 13) {
-      return "rd";
-    }
-    return "th";
   }
 
   // Add trail for a snake
@@ -1094,6 +1050,139 @@ export class GameRenderer {
     this.ctx.shadowBlur = 0;
   }
 
+  // Draw a power-up item
+  public drawPowerUp(powerUp: PowerUp): void {
+    if (!this.isOnScreen(powerUp.position.x, powerUp.position.y, powerUp.radius)) {
+      return;
+    }
+
+    const screenPos = this.worldToScreen(powerUp.position.x, powerUp.position.y);
+    const now = Date.now();
+    const age = now - powerUp.spawnTime;
+    const timeLeft = powerUp.expiryTime - now;
+    const blinkSpeed = Math.max(0.5, Math.min(2, timeLeft / 5000)); // Blink faster as expiry approaches
+    
+    // Pulsing animation
+    const pulseSize = 1 + 0.2 * Math.sin(age / (300 * blinkSpeed));
+    const radius = powerUp.radius * this.zoom * pulseSize;
+    
+    // Base colors for power-up types
+    const powerUpColors: Record<PowerUpType, {base: string, glow: string, icon: string}> = {
+      shield: { 
+        base: "#4FC3F7", 
+        glow: "#29B6F6", 
+        icon: "🛡️" 
+      },
+      magnet: { 
+        base: "#BA68C8", 
+        glow: "#AB47BC", 
+        icon: "🧲" 
+      },
+      ghost: { 
+        base: "#B0BEC5", 
+        glow: "#90A4AE", 
+        icon: "👻" 
+      },
+      giant: { 
+        base: "#FFB74D", 
+        glow: "#FFA726", 
+        icon: "🔱" 
+      }
+    };
+    
+    const colorInfo = powerUpColors[powerUp.type];
+    
+    // External glow
+    this.ctx.shadowBlur = 15;
+    this.ctx.shadowColor = colorInfo.glow;
+    
+    // Draw outer circle
+    this.ctx.beginPath();
+    this.ctx.arc(screenPos.x, screenPos.y, radius, 0, Math.PI * 2);
+    this.ctx.fillStyle = colorInfo.base;
+    this.ctx.fill();
+    
+    // Inner highlight
+    this.ctx.beginPath();
+    this.ctx.arc(screenPos.x, screenPos.y, radius * 0.7, 0, Math.PI * 2);
+    this.ctx.fillStyle = this.lightenColor(colorInfo.base, 30);
+    this.ctx.fill();
+    
+    // Reset shadow
+    this.ctx.shadowBlur = 0;
+    
+    // Draw icon text
+    this.ctx.textAlign = "center";
+    this.ctx.textBaseline = "middle";
+    const fontSize = Math.max(14, radius * 0.8);
+    this.ctx.font = `${fontSize}px Arial`;
+    this.ctx.fillStyle = "#FFFFFF";
+    this.ctx.fillText(colorInfo.icon, screenPos.x, screenPos.y);
+    
+    // Draw time left indicator as a circular progress bar
+    if (timeLeft < 10000) { // Only show countdown when less than 10 seconds left
+      const progress = timeLeft / 30000; // 30 seconds is the total lifetime
+      this.ctx.beginPath();
+      this.ctx.arc(screenPos.x, screenPos.y, radius * 1.3, 0, Math.PI * 2 * progress);
+      this.ctx.strokeStyle = colorInfo.glow;
+      this.ctx.lineWidth = 2;
+      this.ctx.stroke();
+    }
+  }
+
+  // Draw active power-up effects on a snake
+  public drawSnakePowerUpEffects(snake: Snake): void {
+    if (!snake.activePowerUps.length) return;
+    
+    const now = Date.now();
+    const head = snake.segments[0];
+    const screenPos = this.worldToScreen(head.x, head.y);
+    
+    // Show power-up indicators above the snake's name
+    this.ctx.font = `bold ${10 * this.zoom}px Arial`;
+    this.ctx.textAlign = "center";
+    this.ctx.shadowBlur = 3;
+    
+    let iconOffset = -30 * this.zoom;
+    
+    snake.activePowerUps.forEach(powerUp => {
+      const timeLeft = powerUp.endTime - now;
+      if (timeLeft <= 0) return;
+      
+      // Flash when the power-up is about to expire
+      const isFlashing = timeLeft < 3000 && Math.floor(Date.now() / 200) % 2 === 0;
+      if (isFlashing) return;
+      
+      // Icons for each power-up type
+      const icons: Record<PowerUpType, string> = {
+        shield: "🛡️",
+        magnet: "🧲",
+        ghost: "👻",
+        giant: "🔱"
+      };
+      
+      const glowColors: Record<PowerUpType, string> = {
+        shield: "#29B6F6",
+        magnet: "#AB47BC",
+        ghost: "#90A4AE",
+        giant: "#FFA726"
+      };
+      
+      // Draw the icon
+      this.ctx.shadowColor = glowColors[powerUp.type];
+      this.ctx.fillText(
+        icons[powerUp.type],
+        screenPos.x,
+        screenPos.y + iconOffset
+      );
+      
+      iconOffset -= 15 * this.zoom;
+    });
+    
+    // Reset shadow
+    this.ctx.shadowBlur = 0;
+  }
+
   public render(gameState: GameState, playerSnake?: Snake, deltaTime: number = 16.67): void {
     // Check for state changes to trigger effects
     this.checkGameStateChanges(gameState, playerSnake);
@@ -1111,6 +1200,11 @@ export class GameRenderer {
     for (const food of gameState.foods) {
       this.drawFood(food);
     }
+    
+    // Draw all power-ups
+    gameState.powerUps.forEach(powerUp => {
+      this.drawPowerUp(powerUp);
+    });
     
     // Draw other snakes first
     for (const snake of gameState.snakes) {
@@ -1142,11 +1236,18 @@ export class GameRenderer {
     
     // Draw game over if player is dead
     if (playerSnake && !playerSnake.alive) {
-      this.drawGameOver(playerSnake.score, {
-        length: playerSnake.segments.length,
-        kills: playerSnake.kills,
-        position: gameState.leaderboard.findIndex(item => item.id === playerSnake.id) + 1
-      });
+      this.drawGameOver(playerSnake.score);
     }
+
+    // Draw all snakes
+    gameState.snakes.forEach(snake => {
+      // Skip dead snakes
+      if (!snake.alive) return;
+      
+      // Draw power-up effects if any
+      if (snake.activePowerUps.length > 0) {
+        this.drawSnakePowerUpEffects(snake);
+      }
+    });
   }
 } 
