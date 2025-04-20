@@ -48,6 +48,15 @@ export default async function Login(props: { searchParams: Promise<Message> }) {
           >
             Sign in
           </SubmitButton>
+
+          <div className="text-center text-sm text-muted-foreground">
+            <Link 
+              href="/magic-link" 
+              className="hover:text-foreground underline"
+            >
+              Or sign in with a magic link
+            </Link>
+          </div>
           
           <FormMessage message={searchParams} />
         </div>
