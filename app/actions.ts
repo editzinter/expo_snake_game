@@ -64,15 +64,15 @@ export const signInWithMagicLinkAction = async (formData: FormData) => {
   }
 
   // Get action link from data
-  const actionLink = data?.identityChangedAt;
+  // const actionLink = data?.identityChangedAt;
   
   // Check if we have the magic link to send
-  const magicLink = typeof actionLink === 'string' ? actionLink : `${origin}/auth/callback`;
+  const magicLink = `${origin}/auth/callback`;
   
   // Send email via Resend
   const emailResult = await sendMagicLinkEmail(email, magicLink);
   
-  if (!emailResult.success) {
+  if (emailResult.error) {
     console.error("Failed to send magic link email:", emailResult.error);
     return encodedRedirect(
       "error",
@@ -130,12 +130,12 @@ export const forgotPasswordAction = async (formData: FormData) => {
   }
 
   // Get the reset link from the response
-  const resetLink = data?.identityChangedAt || `${origin}/auth/callback?redirect_to=/protected/reset-password`;
+  const resetLink = `${origin}/auth/callback?redirect_to=/protected/reset-password`;
 
   // Send email via Resend
   const emailResult = await sendPasswordResetEmail(email, resetLink);
   
-  if (!emailResult.success) {
+  if (emailResult.error) {
     console.error("Failed to send password reset email:", emailResult.error);
     return encodedRedirect(
       "error",
