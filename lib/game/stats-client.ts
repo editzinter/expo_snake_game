@@ -256,148 +256,201 @@ export const displayStats = () => {
     const stats = JSON.parse(localStats);
     console.log("Player stats:", stats);
     
-    // Display stats on screen with improved UI
-    const statsDisplay = document.createElement('div');
-    statsDisplay.style.position = 'fixed';
-    statsDisplay.style.top = '50%';
-    statsDisplay.style.left = '50%';
-    statsDisplay.style.transform = 'translate(-50%, -50%)';
-    statsDisplay.style.padding = '20px 30px';
-    statsDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-    statsDisplay.style.color = '#fff';
-    statsDisplay.style.borderRadius = '15px';
-    statsDisplay.style.zIndex = '9999';
-    statsDisplay.style.fontFamily = 'system-ui, sans-serif';
-    statsDisplay.style.boxShadow = '0 4px 30px rgba(0, 0, 0, 0.5)';
-    statsDisplay.style.backdropFilter = 'blur(10px)';
-    statsDisplay.style.border = '1px solid rgba(255, 255, 255, 0.1)';
-    statsDisplay.style.width = '300px';
-    statsDisplay.style.textAlign = 'center';
-    statsDisplay.style.animation = 'fadeIn 0.5s ease-out';
+    // Create modal container
+    const modalOverlay = document.createElement('div');
+    modalOverlay.style.position = 'fixed';
+    modalOverlay.style.top = '0';
+    modalOverlay.style.left = '0';
+    modalOverlay.style.right = '0';
+    modalOverlay.style.bottom = '0';
+    modalOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    modalOverlay.style.display = 'flex';
+    modalOverlay.style.justifyContent = 'center';
+    modalOverlay.style.alignItems = 'center';
+    modalOverlay.style.zIndex = '9999';
+    modalOverlay.style.backdropFilter = 'blur(5px)';
+    modalOverlay.style.transition = 'opacity 0.3s ease';
     
-    // Add animation styles
-    const styleElement = document.createElement('style');
-    styleElement.textContent = `
-      @keyframes fadeIn {
-        from { opacity: 0; transform: translate(-50%, -40%); }
-        to { opacity: 1; transform: translate(-50%, -50%); }
-      }
-      @keyframes fadeOut {
-        from { opacity: 1; transform: translate(-50%, -50%); }
-        to { opacity: 0; transform: translate(-50%, -60%); }
-      }
-      .stat-title {
-        font-size: 20px;
-        font-weight: bold;
-        margin-bottom: 15px;
-        color: #fff;
-      }
-      .stat-row {
-        display: flex;
-        justify-content: space-between;
-        margin: 10px 0;
-        padding-bottom: 8px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-      }
-      .stat-label {
-        color: rgba(255, 255, 255, 0.7);
-      }
-      .stat-value {
-        font-weight: bold;
-      }
-      .highlight {
-        color: #f5a623;
-        font-size: 18px;
-      }
-      .close-button {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        background: none;
-        border: none;
-        color: rgba(255, 255, 255, 0.6);
-        font-size: 18px;
-        cursor: pointer;
-        padding: 0;
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .close-button:hover {
-        background: rgba(255, 255, 255, 0.1);
-        color: white;
-      }
-    `;
-    document.head.appendChild(styleElement);
+    // Create modal content
+    const statsModal = document.createElement('div');
+    statsModal.style.width = '350px';
+    statsModal.style.backgroundColor = '#1f2937';
+    statsModal.style.borderRadius = '16px';
+    statsModal.style.boxShadow = '0 25px 50px -12px rgba(0, 0, 0, 0.5)';
+    statsModal.style.overflow = 'hidden';
+    statsModal.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+    statsModal.style.transform = 'scale(0.95)';
+    statsModal.style.transition = 'transform 0.3s ease';
     
-    const playTimeMinutes = Math.floor(stats.total_play_time / 60);
-    const playTimeSeconds = stats.total_play_time % 60;
-    const lastPlayedDate = new Date(stats.last_played).toLocaleString(undefined, { 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    // Modal header
+    const header = document.createElement('div');
+    header.style.backgroundColor = '#111827';
+    header.style.padding = '20px';
+    header.style.borderBottom = '1px solid #374151';
     
-    statsDisplay.innerHTML = `
-      <button class="close-button" onclick="this.parentNode.remove()">×</button>
-      <div class="stat-title">Game Stats</div>
-      
-      <div class="highlight">Score: ${stats.high_score}</div>
-      
-      <div class="stat-row">
-        <span class="stat-label">Games Played</span>
-        <span class="stat-value">${stats.games_played}</span>
-      </div>
-      
-      <div class="stat-row">
-        <span class="stat-label">Longest Snake</span>
-        <span class="stat-value">${stats.longest_snake} segments</span>
-      </div>
-      
-      <div class="stat-row">
-        <span class="stat-label">Total Play Time</span>
-        <span class="stat-value">${playTimeMinutes}m ${playTimeSeconds}s</span>
-      </div>
-      
-      <div class="stat-row" style="border-bottom: none;">
-        <span class="stat-label">Last Played</span>
-        <span class="stat-value">${lastPlayedDate}</span>
-      </div>
-    `;
+    const title = document.createElement('h2');
+    title.textContent = 'Game Over - Your Stats';
+    title.style.margin = '0';
+    title.style.color = '#ffffff';
+    title.style.fontSize = '1.25rem';
+    title.style.fontWeight = '700';
+    title.style.textAlign = 'center';
     
-    document.body.appendChild(statsDisplay);
+    header.appendChild(title);
     
-    // Add close functionality
-    const closeButton = statsDisplay.querySelector('.close-button');
-    if (closeButton) {
-      closeButton.addEventListener('click', () => {
-        statsDisplay.style.animation = 'fadeOut 0.3s ease-in forwards';
-        setTimeout(() => {
-          if (statsDisplay.parentNode) {
-            statsDisplay.parentNode.removeChild(statsDisplay);
-          }
-          document.head.removeChild(styleElement);
-        }, 300);
-      });
+    // Format time for better display
+    const formatTime = (seconds: number) => {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const remainingSeconds = seconds % 60;
+      
+      if (hours > 0) {
+        return `${hours}h ${minutes}m ${remainingSeconds}s`;
+      } else if (minutes > 0) {
+        return `${minutes}m ${remainingSeconds}s`;
+      } else {
+        return `${remainingSeconds}s`;
+      }
+    };
+    
+    // Stats content
+    const content = document.createElement('div');
+    content.style.padding = '20px';
+    
+    const statItems = [
+      { label: 'High Score', value: stats.high_score.toLocaleString() },
+      { label: 'Games Played', value: stats.games_played.toLocaleString() },
+      { label: 'Longest Snake', value: `${stats.longest_snake} segments` },
+      { label: 'Total Play Time', value: formatTime(stats.total_play_time) },
+      { label: 'Last Played', value: new Date(stats.last_played).toLocaleString() }
+    ];
+    
+    // Multiplayer stats if available
+    if (stats.multiplayer_games && stats.multiplayer_games > 0) {
+      statItems.push(
+        { label: 'Multiplayer Games', value: stats.multiplayer_games.toLocaleString() },
+        { label: 'Multiplayer Kills', value: (stats.multiplayer_kills || 0).toLocaleString() }
+      );
+      
+      if (stats.multiplayer_wins && stats.multiplayer_wins > 0) {
+        statItems.push({ label: 'Multiplayer Wins', value: stats.multiplayer_wins.toLocaleString() });
+      }
     }
     
-    // Remove after 8 seconds (longer display time)
-    setTimeout(() => {
-      if (statsDisplay.parentNode) {
-        statsDisplay.style.animation = 'fadeOut 0.3s ease-in forwards';
-        setTimeout(() => {
-          if (statsDisplay.parentNode) {
-            statsDisplay.parentNode.removeChild(statsDisplay);
-          }
-          document.head.removeChild(styleElement);
-        }, 300);
+    statItems.forEach(item => {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.marginBottom = '12px';
+      row.style.padding = '8px';
+      row.style.borderRadius = '8px';
+      row.style.backgroundColor = '#374151';
+      
+      const label = document.createElement('span');
+      label.textContent = item.label;
+      label.style.color = '#d1d5db';
+      label.style.fontWeight = '500';
+      
+      const value = document.createElement('span');
+      value.textContent = item.value;
+      value.style.color = '#ffffff';
+      value.style.fontWeight = '700';
+      
+      row.appendChild(label);
+      row.appendChild(value);
+      content.appendChild(row);
+    });
+    
+    // Create footer with buttons
+    const footer = document.createElement('div');
+    footer.style.padding = '20px';
+    footer.style.borderTop = '1px solid #374151';
+    footer.style.display = 'flex';
+    footer.style.justifyContent = 'center';
+    footer.style.gap = '10px';
+    
+    const playAgainBtn = document.createElement('button');
+    playAgainBtn.textContent = 'Play Again';
+    playAgainBtn.style.backgroundColor = '#4f46e5';
+    playAgainBtn.style.color = '#ffffff';
+    playAgainBtn.style.border = 'none';
+    playAgainBtn.style.padding = '8px 16px';
+    playAgainBtn.style.borderRadius = '6px';
+    playAgainBtn.style.fontWeight = '600';
+    playAgainBtn.style.fontSize = '0.875rem';
+    playAgainBtn.style.cursor = 'pointer';
+    playAgainBtn.style.transition = 'background-color 0.2s';
+    
+    playAgainBtn.onmouseover = () => {
+      playAgainBtn.style.backgroundColor = '#4338ca';
+    };
+    
+    playAgainBtn.onmouseout = () => {
+      playAgainBtn.style.backgroundColor = '#4f46e5';
+    };
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.backgroundColor = '#1f2937';
+    closeBtn.style.color = '#d1d5db';
+    closeBtn.style.border = '1px solid #374151';
+    closeBtn.style.padding = '8px 16px';
+    closeBtn.style.borderRadius = '6px';
+    closeBtn.style.fontWeight = '600';
+    closeBtn.style.fontSize = '0.875rem';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.style.transition = 'background-color 0.2s';
+    
+    closeBtn.onmouseover = () => {
+      closeBtn.style.backgroundColor = '#374151';
+    };
+    
+    closeBtn.onmouseout = () => {
+      closeBtn.style.backgroundColor = '#1f2937';
+    };
+    
+    // Event listeners for buttons
+    playAgainBtn.onclick = () => {
+      document.body.removeChild(modalOverlay);
+      
+      // Trigger a click event on the canvas to restart the game
+      const canvas = document.querySelector('canvas');
+      if (canvas) {
+        canvas.dispatchEvent(new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          view: window
+        }));
       }
-    }, 8000);
+    };
+    
+    closeBtn.onclick = () => {
+      document.body.removeChild(modalOverlay);
+    };
+    
+    // Close when clicking outside modal
+    modalOverlay.onclick = (e) => {
+      if (e.target === modalOverlay) {
+        document.body.removeChild(modalOverlay);
+      }
+    };
+    
+    footer.appendChild(playAgainBtn);
+    footer.appendChild(closeBtn);
+    
+    // Assemble modal
+    statsModal.appendChild(header);
+    statsModal.appendChild(content);
+    statsModal.appendChild(footer);
+    modalOverlay.appendChild(statsModal);
+    
+    // Add to body
+    document.body.appendChild(modalOverlay);
+    
+    // Animation effect
+    setTimeout(() => {
+      statsModal.style.transform = 'scale(1)';
+    }, 10);
     
     return stats;
   } catch (e) {
