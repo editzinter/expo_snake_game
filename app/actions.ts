@@ -132,3 +132,42 @@ export const signOutAction = async () => {
   await supabase.auth.signOut();
   return redirect("/sign-in");
 };
+
+export async function ensurePlayTimeField() {
+  const supabase = await createClient();
+  
+  try {
+    // First, check if the column exists
+    const { data, error } = await supabase
+      .from('player_stats')
+      .select('total_play_time')
+      .limit(1);
+    
+    if (error) {
+      // If column doesn't exist, add it
+      if (error.message.includes('column "total_play_time" does not exist')) {
+        console.log("Adding total_play_time column to player_stats table");
+        // You would need admin privileges to alter table schema
+        // This is just a placeholder - you'd need to perform this in Supabase dashboard
+        // or using a migration script
+        return { success: false, message: "Please add total_play_time column to player_stats table in Supabase dashboard" };
+      } else {
+        return { success: false, message: error.message };
+      }
+    }
+    
+    // Column exists, update any NULL values to 0
+    console.log("Updating NULL total_play_time values to 0");
+    const { error: updateError } = await supabase
+      .rpc('initialize_play_time');
+    
+    if (updateError) {
+      return { success: false, message: updateError.message };
+    }
+    
+    return { success: true, message: "Play time field verified and updated" };
+  } catch (error) {
+    console.error("Error ensuring play time field:", error);
+    return { success: false, message: "An unexpected error occurred" };
+  }
+}

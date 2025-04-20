@@ -102,3 +102,110 @@ Please file feedback and issues over on the [Supabase GitHub org](https://github
 - [Next.js Subscription Payments Starter](https://github.com/vercel/nextjs-subscription-payments)
 - [Cookie-based Auth and the Next.js 13 App Router (free course)](https://youtube.com/playlist?list=PL5S4mPUpp4OtMhpnp93EFSo42iQ40XjbF)
 - [Supabase Auth and the Next.js App Router](https://github.com/supabase/supabase/tree/master/examples/auth/nextjs)
+
+# Snake.io Game
+
+A multiplayer snake game inspired by Slither.io, built with Next.js, HTML5 Canvas, and WebSockets.
+
+## Features
+
+- Real-time multiplayer gameplay
+- Smooth snake movement using mouse controls
+- Eat pellets to grow larger
+- Collision detection with other snakes
+- Leaderboard to track top players
+- Works in both online and offline modes
+- Responsive design that works on various devices
+
+## Technologies Used
+
+- **Frontend**: Next.js, React, TypeScript, Tailwind CSS
+- **Graphics**: HTML5 Canvas
+- **Real-time Communication**: Socket.IO
+- **Server**: Node.js, Express
+- **Authentication**: Supabase (optional)
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+ and npm
+
+### Installation
+
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd snake-io-game
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+### Running the Game
+
+#### Development Mode
+
+Run both the Next.js app and the game server concurrently:
+
+```bash
+npm run dev:all
+```
+
+Or run them separately:
+
+```bash
+# Terminal 1: Run the Next.js app
+npm run dev
+
+# Terminal 2: Run the game server
+npm run dev:server
+```
+
+#### Production Mode
+
+Build and start the application:
+
+```bash
+npm run build
+npm run start
+```
+
+Start the game server:
+
+```bash
+npm run server
+```
+
+### Game Controls
+
+- **Mouse Movement**: Control the direction of your snake
+- **Click**: Restart the game after death
+
+## Architecture
+
+This project follows a client-server architecture:
+
+1. **Client-side (Next.js)**:
+   - Renders the game using HTML5 Canvas
+   - Handles user input and displays game state
+   - Communicates with the server via WebSockets
+
+2. **Server-side (Node.js)**:
+   - Manages the game state and logic
+   - Processes player movements and collisions
+   - Broadcasts updates to all connected clients
+
+The game is designed to work both in online multiplayer mode and offline single-player mode for development and testing.
+
+## License
+
+[MIT](LICENSE)
+
+## Acknowledgements
+
+- Inspired by the original [Slither.io](https://slither.io/) game
+- Built with [Next.js](https://nextjs.org/)
+- Real-time communication powered by [Socket.IO](https://socket.io/)
