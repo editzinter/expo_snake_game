@@ -1,25 +1,20 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "next-themes";
-import { GameEngine } from "@/lib/game/engine";
-import { GameRenderer } from "./GameRenderer";
+import { GameEngine, GameEventType } from "@/lib/game/engine";
+import { GameRenderer } from "@/components/game/GameRenderer";
 import { Snake, PlayerInput, GameState } from "@/lib/game/models";
 import { v4 as uuidv4 } from "uuid";
 import { gameSocketClient } from "@/lib/game/socket-client";
 import { soundManager } from "@/lib/audio/SoundManager";
-import SoundControl from "./SoundControl";
-import { GameEventType } from '@/lib/game/engine';
 import { gameStatsClient, GameStats, testDatabaseConnection, displayStats } from "@/lib/game/stats-client";
 import { createBrowserClient } from "@supabase/ssr";
 import { Users, X, Info, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from "lucide-react";
 import Leaderboard from './Leaderboard';
 import ChatBox from './ChatBox';
-import GameHeader from "./GameHeader";
+import SoundControl from './SoundControl';
 import { useRouter } from "next/navigation";
-import { createClientComponentClient } from "@/utils/supabase-browser";
-import { Socket } from "socket.io-client";
-import { GameSocketClient } from "@/lib/game/socket-client";
 
 interface GameCanvasProps {
   width?: number;
@@ -190,9 +185,21 @@ const GameCanvas = ({
   useEffect(() => {
     const checkAuth = async () => {
       try {
+        // Skip actual auth check in development mode
+        if (process.env.NODE_ENV === 'development') {
+          console.log("Development mode: skipping auth check");
+          return;
+        }
+        
+        // Only check auth if we have Supabase credentials
+        if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+          console.log("No Supabase credentials available, skipping auth check");
+          return;
+        }
+        
         const supabase = createBrowserClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+          process.env.NEXT_PUBLIC_SUPABASE_URL,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
         );
         
         // Try session check first (most reliable)
@@ -203,16 +210,6 @@ const GameCanvas = ({
           // User is definitely logged in - remember this
           localStorage.setItem('userHasAuthenticated', 'true');
           console.log("User authenticated, saved to local storage");
-        }
-        
-        // Also try user check as fallback
-        const { data: userData } = await supabase.auth.getUser();
-        console.log("Initial auth check - user exists:", !!userData?.user);
-        
-        if (userData?.user?.id) {
-          // User is definitely logged in - remember this
-          localStorage.setItem('userHasAuthenticated', 'true');
-          console.log("User authenticated (from getUser), saved to local storage");
         }
       } catch (err) {
         console.error("Initial auth check error:", err);
@@ -1228,11 +1225,31 @@ const GameCanvas = ({
   return (
     <div className="w-full h-full flex flex-col relative overflow-hidden">
       {/* Header with player name */}
-      <GameHeader 
-        onNameChange={handleNameChange} 
-        initialName={playerName}
-        isMultiplayer={isOnlineMode || forceOnlineMode}
-      />
+      <div className="flex items-center justify-between bg-gradient-to-r from-indigo-900/70 to-purple-900/70 backdrop-blur-md shadow-lg border-b border-indigo-500/30 p-4">
+        <div className="flex items-center">
+          <h1 className="text-xl font-bold text-white">
+            <span className="bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-purple-400">
+              Snake.io
+            </span>
+          </h1>
+          {(isOnlineMode || forceOnlineMode) && (
+            <div className="ml-2 flex items-center space-x-1 bg-indigo-600/50 px-2 py-1 rounded-full text-white text-xs">
+              <Users size={12} />
+              <span>Multiplayer</span>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center">
+          <div className="text-white mr-2">Playing as:</div>
+          <input
+            type="text"
+            value={playerName}
+            onChange={(e) => setPlayerName(e.target.value)}
+            className="bg-indigo-900/50 border border-indigo-400/30 rounded px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            placeholder="Enter your name"
+          />
+        </div>
+      </div>
       
       {/* Tutorial toggle button */}
       <button 
