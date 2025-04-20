@@ -6,11 +6,10 @@ import Link from "next/link";
 import { ArrowLeft, Clock, Database, Wrench } from "lucide-react";
 import { ensurePlayTimeField } from "@/app/actions";
 
-interface StatsDebugProps {
-  searchParams: { fix?: string };
-}
-
-export default async function StatsDebugPage({ searchParams }: StatsDebugProps) {
+export default async function StatsDebugPage(props: { 
+  searchParams: Promise<{ fix?: string }> 
+}) {
+  const searchParams = await props.searchParams;
   const supabase = await createClient();
   let fixResult = { success: false, message: "" };
 
