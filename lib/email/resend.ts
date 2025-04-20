@@ -3,7 +3,12 @@
 import { Resend } from 'resend';
 
 // Initialize the Resend client with API key from environment variable
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Add fallback and error handling for missing API key
+const apiKey = process.env.RESEND_API_KEY || '';
+if (!apiKey) {
+  console.warn("Warning: RESEND_API_KEY is not set. Email functionality will not work properly.");
+}
+const resend = new Resend(apiKey);
 
 /**
  * Sends a magic link email for user authentication
@@ -14,6 +19,11 @@ export async function sendMagicLinkEmail(
   fromEmail: string = 'noreply@yourapp.com'
 ) {
   try {
+    if (!process.env.RESEND_API_KEY) {
+      console.error("RESEND_API_KEY is not set. Cannot send magic link email.");
+      return { data: null, error: new Error("API key not configured") };
+    }
+    
     const { data, error } = await resend.emails.send({
       from: fromEmail,
       to: email,
@@ -47,6 +57,11 @@ export async function sendPasswordResetEmail(
   fromEmail: string = 'noreply@yourapp.com'
 ) {
   try {
+    if (!process.env.RESEND_API_KEY) {
+      console.error("RESEND_API_KEY is not set. Cannot send password reset email.");
+      return { data: null, error: new Error("API key not configured") };
+    }
+    
     const { data, error } = await resend.emails.send({
       from: fromEmail,
       to: email,
