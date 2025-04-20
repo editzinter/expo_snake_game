@@ -135,62 +135,27 @@ export class GameEngine {
   public addPlayer(name: string): string {
     const id = uuidv4();
     
-    // Spawn player away from edges with a larger safe zone
-    const padding = 300; // Increased from 200
+    // Spawn player away from edges with a much larger safe area
+    // Increased padding to prevent spawning near danger zones
+    const padding = Math.max(300, BORDER_DANGER_ZONE * 3); // At least 300px or 3x the danger zone
     
-    // Try multiple spawn locations to find a safe one
-    let attempts = 0;
-    let position: Point = {
+    // Ensure the spawn point is well within the safe area of the map
+    const position: Point = {
       x: padding + Math.random() * (this.state.width - padding * 2),
       y: padding + Math.random() * (this.state.height - padding * 2),
     };
-    let isSafe = false;
     
-    // Keep trying until we find a safe position or reach max attempts
-    while (!isSafe && attempts < 10) {
-      // Generate a new position each attempt
-      position = {
-        x: padding + Math.random() * (this.state.width - padding * 2),
-        y: padding + Math.random() * (this.state.height - padding * 2),
-      };
-      
-      // Check for proximity to other snakes
-      isSafe = true;
-      for (const otherSnake of this.state.snakes) {
-        if (!otherSnake.alive || otherSnake.segments.length === 0) continue;
-        
-        // Check distance to other snake's head
-        const head = otherSnake.segments[0];
-        const dist = Math.sqrt(
-          Math.pow(position.x - head.x, 2) + 
-          Math.pow(position.y - head.y, 2)
-        );
-        
-        // If too close to another snake, try again
-        if (dist < 200) {
-          isSafe = false;
-          break;
-        }
-      }
-      
-      attempts++;
-    }
+    // Debug log to verify spawn location
+    console.log(`Spawning player at: (${position.x}, ${position.y}) with map size: ${this.state.width}x${this.state.height}, safe padding: ${padding}`);
     
-    // Create the snake
+    // Create new snake with the safe position
     const snake = createSnake(id, name, position);
     
-    // Save creation time on the snake for accurate play time calculation
-    (snake as any).createdAt = Date.now();
+    // Set creation timestamp to track play time accurately
+    snake.createdAt = Date.now();
     
-    // Add to snakes list
+    // Add to the game
     this.state.snakes.push(snake);
-    
-    // Make sure the snake is initialized with a reasonable non-zero speed
-    // This ensures proper movement from the start
-    if (snake.speed === 0) {
-      snake.speed = 2.5; // Default movement speed
-      snake.baseSpeed = 2.5;
-    }
     
     return id;
   }
@@ -260,6 +225,12 @@ export class GameEngine {
         this.emitEvent('boostEnd', { playerId: snake.id });
       }
     }
+  }
+  
+  // Add a safety check method to prevent border deaths during the first few seconds
+  private isNewlyCreatedSnake(snake: Snake): boolean {
+    const spawnGracePeriodMs = 2000; // 2 seconds of immunity
+    return (Date.now() - snake.createdAt) < spawnGracePeriodMs;
   }
   
   // Main game loop - updates game state
@@ -551,10 +522,28 @@ export class GameEngine {
         }
       }
       
-      // Check world boundary collision
-      if (head.x < 0 || head.x >= this.worldWidth || head.y < 0 || head.y >= this.worldHeight) {
-        this.killSnake(snake.id, null, 'border');
-        return; // No need to check further
+      // Check world boundary collision - add grace period for newly spawned snakes
+      const isOutOfBounds = head.x < 0 || head.x >= this.worldWidth || head.y < 0 || head.y >= this.worldHeight;
+      if (isOutOfBounds) {
+        // Add grace period - don't kill newly created snakes due to border collisions
+        if (this.isNewlyCreatedSnake(snake)) {
+          console.log(`Protecting newly spawned snake ${snake.id} from border death`);
+          
+          // Move the snake back into bounds if it went outside
+          if (head.x < 0) head.x = 50;
+          if (head.x >= this.worldWidth) head.x = this.worldWidth - 50;
+          if (head.y < 0) head.y = 50;
+          if (head.y >= this.worldHeight) head.y = this.worldHeight - 50;
+          
+          // Adjust direction away from border
+          snake.direction = {
+            x: snake.direction.x * (head.x < this.worldWidth/2 ? 1 : -1),
+            y: snake.direction.y * (head.y < this.worldHeight/2 ? 1 : -1)
+          };
+        } else {
+          this.killSnake(snake.id, null, 'border');
+          return; // No need to check further
+        }
       }
     });
   }

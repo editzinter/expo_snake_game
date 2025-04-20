@@ -25,6 +25,7 @@ export interface Snake {
   boostEndTime: number; // Timestamp when boost will end
   kills: number; // Add kill tracking for multiplayer
   lastKill?: string; // Keep track of the last player killed
+  createdAt: number; // Add this line to track when the snake was created
 }
 
 export interface Food {
@@ -129,7 +130,8 @@ export function createSnake(id: string, name: string, position: Point): Snake {
     isBoosting: false,
     boostEndTime: 0,
     kills: 0,
-    lastKill: undefined
+    lastKill: undefined,
+    createdAt: Date.now()
   };
 }
 

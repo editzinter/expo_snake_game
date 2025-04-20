@@ -866,6 +866,26 @@ const GameCanvas = ({
     
     console.log("handlePlayerDeath called");
     
+    // Calculate play time in seconds
+    const playTimeSeconds = Math.floor((Date.now() - gameStartTime) / 1000);
+    
+    // *** Add this guard against instant death bug ***
+    // Ignore death events that happen too quickly after spawning (likely due to spawn location issues)
+    if (playTimeSeconds < 1) {
+      console.log("Ignoring death event that occurred too quickly after spawn", playTimeSeconds);
+      
+      // Reset the player if we're in offline mode
+      if (!isOnlineMode && gameEngine) {
+        // Create a new player to replace the one that died too quickly
+        gameEngine.removePlayer(playerId);
+        const newId = gameEngine.addPlayer(playerName);
+        setPlayerId(newId);
+        
+        // Don't show death stats or record the death
+        return;
+      }
+    }
+    
     // Release pointer lock if active
     if (document.pointerLockElement) {
       document.exitPointerLock();
@@ -888,29 +908,6 @@ const GameCanvas = ({
       return;
     }
     
-    // Calculate play time in seconds
-    const playTimeSeconds = Math.floor((Date.now() - gameStartTime) / 1000);
-    
-    // If the player has played for less than 2 seconds, this is likely a false death event
-    // This prevents the instant game over screen bug
-    if (playTimeSeconds < 2) {
-      console.log("Ignoring death event that occurred too soon after game start");
-      
-      // Instead of showing death stats, restart the player if in local mode
-      if (!isOnlineMode && gameEngine) {
-        console.log("Auto-restarting player in local mode");
-        gameEngine.removePlayer(playerId);
-        const newId = gameEngine.addPlayer(playerName);
-        setPlayerId(newId);
-      }
-      return;
-    }
-    
-    // Test database connection 
-    testDatabaseConnection().then(result => {
-      console.log("Database connection test before recording death stats:", result);
-    });
-    
     // Prepare stats object
     const stats: GameStats = {
       score: playerSnake.score,
@@ -927,22 +924,6 @@ const GameCanvas = ({
     setShowDeathStats(true);
     
     console.log("Recording death stats:", stats);
-    
-    // Check authentication status
-    const checkAuth = async () => {
-      try {
-        const supabase = createBrowserClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        );
-        const { data: { user } } = await supabase.auth.getUser();
-        console.log("Auth check in handlePlayerDeath - user:", user);
-      } catch (err) {
-        console.error("Auth check error:", err);
-      }
-    };
-    
-    checkAuth();
     
     // Record the stats
     gameStatsClient.recordMatch(stats)
