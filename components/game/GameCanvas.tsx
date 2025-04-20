@@ -681,14 +681,27 @@ const GameCanvas = ({
     
     let lastTime = 0;
     let animationFrameId: number;
+    
+    // Performance optimization settings
+    const PHYSICS_STEP = 1000 / 60; // Fixed time step for physics (60 FPS)
+    let physicsAccumulator = 0;
 
     const gameLoop = (timestamp: number) => {
       // Calculate delta time
       const deltaTime = lastTime > 0 ? timestamp - lastTime : 0;
       lastTime = timestamp;
-
-      // Update game state
-      gameEngine.update(deltaTime);
+      
+      // Cap delta time to prevent huge jumps after tab switches/sleep
+      const cappedDeltaTime = Math.min(deltaTime, 100);
+      
+      // Update physics with fixed time step for consistent simulation
+      physicsAccumulator += cappedDeltaTime;
+      
+      // Process multiple physics updates if needed to catch up
+      while (physicsAccumulator >= PHYSICS_STEP) {
+        gameEngine.update(PHYSICS_STEP);
+        physicsAccumulator -= PHYSICS_STEP;
+      }
       
       // Get the updated state
       const state = gameEngine.getState();
@@ -700,9 +713,10 @@ const GameCanvas = ({
         gameRenderer.setCameraPosition(head.x, head.y);
       }
       
-      // Pass deltaTime to the renderer
-      gameRenderer.render(state, playerSnake, deltaTime);
-
+      // Pass the real delta time to the renderer for smooth animations
+      gameRenderer.updateEffects(cappedDeltaTime);
+      gameRenderer.render(state, playerSnake, cappedDeltaTime);
+      
       // Request next frame
       animationFrameId = requestAnimationFrame(gameLoop);
     };
@@ -823,6 +837,9 @@ const GameCanvas = ({
           const newId = gameEngine.addPlayer(playerName);
           setPlayerId(newId);
         }
+      } else if (playerSnake && playerSnake.alive && !isPointerLocked) {
+        // If the game is active and the player is alive, lock the pointer
+        lockPointer();
       }
     };
 
@@ -836,7 +853,7 @@ const GameCanvas = ({
         canvas.removeEventListener("click", handleClick);
       }
     };
-  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState, playerName]);
+  }, [isInitialized, gameEngine, playerId, isOnlineMode, gameState, playerName, isPointerLocked]);
 
   // Handle zoom in/out buttons
   const handleZoomIn = () => {
@@ -866,6 +883,9 @@ const GameCanvas = ({
     
     console.log("handlePlayerDeath called");
     
+    // Release pointer lock if active
+    unlockPointer();
+    
     // Calculate play time in seconds
     const playTimeSeconds = Math.floor((Date.now() - gameStartTime) / 1000);
     
@@ -884,11 +904,6 @@ const GameCanvas = ({
         // Don't show death stats or record the death
         return;
       }
-    }
-    
-    // Release pointer lock if active
-    if (document.pointerLockElement) {
-      document.exitPointerLock();
     }
     
     // Get the player's final stats
@@ -1112,6 +1127,44 @@ const GameCanvas = ({
       };
     }
   }, [isOnlineMode, gameState]);
+
+  // Function to lock pointer
+  const lockPointer = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    canvas.requestPointerLock = canvas.requestPointerLock || 
+                              (canvas as any).mozRequestPointerLock ||
+                              (canvas as any).webkitRequestPointerLock;
+    canvas.requestPointerLock();
+  };
+  
+  // Function to unlock pointer
+  const unlockPointer = () => {
+    if (document.pointerLockElement) {
+      document.exitPointerLock = document.exitPointerLock || 
+                               (document as any).mozExitPointerLock ||
+                               (document as any).webkitExitPointerLock;
+      document.exitPointerLock();
+    }
+  };
+  
+  // Track pointer lock state
+  useEffect(() => {
+    const handlePointerLockChange = () => {
+      setIsPointerLocked(document.pointerLockElement === canvasRef.current);
+    };
+    
+    document.addEventListener('pointerlockchange', handlePointerLockChange);
+    document.addEventListener('mozpointerlockchange', handlePointerLockChange);
+    document.addEventListener('webkitpointerlockchange', handlePointerLockChange);
+    
+    return () => {
+      document.removeEventListener('pointerlockchange', handlePointerLockChange);
+      document.removeEventListener('mozpointerlockchange', handlePointerLockChange);
+      document.removeEventListener('webkitpointerlockchange', handlePointerLockChange);
+    };
+  }, []);
 
   return (
     <div className="relative w-full h-full overflow-hidden">

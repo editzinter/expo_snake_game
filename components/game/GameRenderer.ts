@@ -621,7 +621,7 @@ export class GameRenderer {
   }
 
   // Draw a game over message
-  public drawGameOver(score: number): void {
+  public drawGameOver(score: number, stats?: { length: number, kills?: number, position?: number }): void {
     // Semi-transparent overlay
     this.ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
     this.ctx.fillRect(0, 0, this.screenWidth, this.screenHeight);
@@ -630,9 +630,9 @@ export class GameRenderer {
     this.ctx.fillStyle = "rgba(5, 5, 21, 0.8)";
     this.ctx.fillRect(
       this.screenWidth / 2 - 200,
-      this.screenHeight / 2 - 100,
+      this.screenHeight / 2 - 150,
       400,
-      200
+      300
     );
     
     // Glow border
@@ -642,9 +642,9 @@ export class GameRenderer {
     this.ctx.lineWidth = 3;
     this.ctx.strokeRect(
       this.screenWidth / 2 - 200,
-      this.screenHeight / 2 - 100,
+      this.screenHeight / 2 - 150,
       400,
-      200
+      300
     );
     
     // Title with glow
@@ -656,19 +656,54 @@ export class GameRenderer {
     this.ctx.fillText(
       "Game Over",
       this.screenWidth / 2,
-      this.screenHeight / 2 - 40
+      this.screenHeight / 2 - 100
     );
 
     // Score with glow
-    this.ctx.font = "24px Arial";
+    this.ctx.font = "26px Arial";
     this.ctx.fillStyle = "#FFFFFF";
     this.ctx.shadowBlur = 5;
     this.ctx.shadowColor = "#FFFFFF";
     this.ctx.fillText(
-      `Your score: ${score}`,
+      `Score: ${score}`,
       this.screenWidth / 2,
-      this.screenHeight / 2 + 10
+      this.screenHeight / 2 - 40
     );
+
+    // Additional stats if provided
+    if (stats) {
+      this.ctx.font = "20px Arial";
+      this.ctx.fillStyle = "#DDDDDD";
+      this.ctx.shadowBlur = 3;
+      
+      const yStart = this.screenHeight / 2;
+      const lineHeight = 35;
+      let currentY = yStart;
+      
+      this.ctx.fillText(
+        `Length: ${stats.length}`,
+        this.screenWidth / 2,
+        currentY
+      );
+      currentY += lineHeight;
+      
+      if (stats.kills !== undefined) {
+        this.ctx.fillText(
+          `Kills: ${stats.kills}`,
+          this.screenWidth / 2,
+          currentY
+        );
+        currentY += lineHeight;
+      }
+      
+      if (stats.position !== undefined) {
+        this.ctx.fillText(
+          `Position: ${stats.position}${this.getOrdinalSuffix(stats.position)}`,
+          this.screenWidth / 2,
+          currentY
+        );
+      }
+    }
 
     // Instruction
     this.ctx.font = "18px Arial";
@@ -677,8 +712,24 @@ export class GameRenderer {
     this.ctx.fillText(
       "Click to play again",
       this.screenWidth / 2,
-      this.screenHeight / 2 + 60
+      this.screenHeight / 2 + 120
     );
+  }
+  
+  // Helper function to get ordinal suffix
+  private getOrdinalSuffix(i: number): string {
+    const j = i % 10,
+          k = i % 100;
+    if (j == 1 && k != 11) {
+      return "st";
+    }
+    if (j == 2 && k != 12) {
+      return "nd";
+    }
+    if (j == 3 && k != 13) {
+      return "rd";
+    }
+    return "th";
   }
 
   // Add trail for a snake
@@ -1091,7 +1142,11 @@ export class GameRenderer {
     
     // Draw game over if player is dead
     if (playerSnake && !playerSnake.alive) {
-      this.drawGameOver(playerSnake.score);
+      this.drawGameOver(playerSnake.score, {
+        length: playerSnake.segments.length,
+        kills: playerSnake.kills,
+        position: gameState.leaderboard.findIndex(item => item.id === playerSnake.id) + 1
+      });
     }
   }
 } 
