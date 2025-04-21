@@ -55,34 +55,19 @@ class GameSocketClient {
   public connect(): void {
     if (this.socket) return;
     
-    // Dynamically determine socket URL - default to env var or localhost if not available
-    let socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
-    
-    // If we're in a browser and no env var is set, determine socket URL based on current origin
-    if (typeof window !== 'undefined' && !socketUrl) {
-      const windowOrigin = window.location.origin;
-      const hostname = window.location.hostname;
-      const port = '3002'; // Socket server port
-      
-      // If we're connecting from an IP address, use that same IP
-      if (hostname !== 'localhost' && /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
-        socketUrl = `http://${hostname}:${port}`;
-      } else {
-        socketUrl = `http://localhost:${port}`;
-      }
-      
-      console.log(`Dynamically determined socket URL: ${socketUrl} based on origin: ${windowOrigin}`);
-    } else {
-      socketUrl = socketUrl || "http://localhost:3002";
-    }
+    // Use the environment variable NEXT_PUBLIC_SOCKET_SERVER_URL for the socket server URL
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || 
+                       (typeof window !== 'undefined' ? 
+                        `${window.location.protocol}//${window.location.hostname}:3002` : 
+                        "http://localhost:3002");
     
     try {
-      console.log(`Attempting to connect to WebSocket server at ${socketUrl}`);
+      console.log(`Connecting to game server at: ${socketUrl}`);
       
       this.socket = io(socketUrl, {
         transports: ["websocket", "polling"], // Add polling as fallback
         autoConnect: true,
-        reconnectionAttempts: 3, // Limit reconnection attempts
+        reconnectionAttempts: 5, // Increase reconnection attempts
         timeout: 10000, // Increase timeout to 10 seconds
         reconnectionDelay: 1000, // 1 second delay between reconnection attempts
       });

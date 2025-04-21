@@ -5,7 +5,9 @@
     "build": "next build",
     "start": "next start",
     "server": "node server.js",
+    "game-server": "node game-server.js",
     "dev:server": "nodemon server.js",
+    "dev:game-server": "nodemon game-server.js",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:server\""
   },
   "dependencies": {
@@ -34,6 +36,7 @@
     "uuid": "^9.0.1"
   },
   "devDependencies": {
+    "@netlify/plugin-nextjs": "^5.10.7",
     "@supabase/ssr": "^0.6.1",
     "@types/node": "22.10.2",
     "@types/react": "^19.0.2",

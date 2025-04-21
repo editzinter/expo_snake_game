@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: snake-game-server
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run game-server
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: FRONTEND_URL
+        sync: false # This means you'll set it in the dashboard
+    healthCheckPath: /health 
