@@ -4,7 +4,6 @@ import { encodedRedirect } from "@/utils/utils";
 import { createClient } from "@/utils/supabase/server";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { sendMagicLinkEmail, sendPasswordResetEmail } from "@/lib/email/resend";
 
 export const signUpAction = async (formData: FormData) => {
   const email = formData.get("email")?.toString();
@@ -40,54 +39,6 @@ export const signUpAction = async (formData: FormData) => {
   }
 };
 
-export const signInWithMagicLinkAction = async (formData: FormData) => {
-  const email = formData.get("email")?.toString();
-  const supabase = await createClient();
-  const origin = (await headers()).get("origin");
-
-  if (!email) {
-    return encodedRedirect("error", "/sign-in", "Email is required");
-  }
-
-  // Generate OTP (Magic Link)
-  const { data, error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      shouldCreateUser: true, // Create a new user if they don't exist
-      emailRedirectTo: `${origin}/auth/callback`, // Where to redirect after verification
-    },
-  });
-
-  if (error) {
-    console.error("Magic link error:", error);
-    return encodedRedirect("error", "/sign-in", error.message);
-  }
-
-  // Get action link from data
-  // const actionLink = data?.identityChangedAt;
-  
-  // Check if we have the magic link to send
-  const magicLink = `${origin}/auth/callback`;
-  
-  // Send email via Resend
-  const emailResult = await sendMagicLinkEmail(email, magicLink);
-  
-  if (emailResult.error) {
-    console.error("Failed to send magic link email:", emailResult.error);
-    return encodedRedirect(
-      "error",
-      "/sign-in",
-      "Could not send magic link email. Please try again."
-    );
-  }
-
-  return encodedRedirect(
-    "success",
-    "/sign-in",
-    "Check your email for a magic link to sign in."
-  );
-};
-
 export const signInAction = async (formData: FormData) => {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
@@ -115,32 +66,16 @@ export const forgotPasswordAction = async (formData: FormData) => {
     return encodedRedirect("error", "/forgot-password", "Email is required");
   }
 
-  // Generate password reset token
-  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${origin}/auth/callback?redirect_to=/protected/reset-password`,
   });
 
   if (error) {
-    console.error("Password reset error:", error);
+    console.error(error.message);
     return encodedRedirect(
       "error",
       "/forgot-password",
       "Could not reset password",
-    );
-  }
-
-  // Get the reset link from the response
-  const resetLink = `${origin}/auth/callback?redirect_to=/protected/reset-password`;
-
-  // Send email via Resend
-  const emailResult = await sendPasswordResetEmail(email, resetLink);
-  
-  if (emailResult.error) {
-    console.error("Failed to send password reset email:", emailResult.error);
-    return encodedRedirect(
-      "error",
-      "/forgot-password",
-      "Could not send password reset email. Please try again."
     );
   }
 
@@ -236,3 +171,37 @@ export async function ensurePlayTimeField() {
     return { success: false, message: "An unexpected error occurred" };
   }
 }
+
+// Add magic link authentication action
+export const signInWithMagicLinkAction = async (formData: FormData) => {
+  const email = formData.get("email")?.toString();
+  const supabase = await createClient();
+  const origin = (await headers()).get("origin");
+
+  if (!email) {
+    return encodedRedirect(
+      "error",
+      "/sign-in",
+      "Email is required"
+    );
+  }
+
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: `${origin}/auth/callback`,
+      shouldCreateUser: true, // This allows new users to be created
+    },
+  });
+
+  if (error) {
+    console.error(error.code + " " + error.message);
+    return encodedRedirect("error", "/sign-in", error.message);
+  } else {
+    return encodedRedirect(
+      "success",
+      "/sign-in",
+      "Magic link sent! Please check your email for the login link.",
+    );
+  }
+};

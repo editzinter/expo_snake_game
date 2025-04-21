@@ -1,11 +1,11 @@
-import { signUpAction } from "@/app/actions";
-import { signInWithMagicLinkAction } from "@/app/magic-auth";
+import { signUpAction, signInWithMagicLinkAction } from "@/app/actions";
 import { FormMessage, Message } from "@/components/form-message";
 import { SubmitButton } from "@/components/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Link from "next/link";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Mail, Key } from "lucide-react";
 
 export default async function Signup(props: {
   searchParams: Promise<Message>;
@@ -28,14 +28,19 @@ export default async function Signup(props: {
           Sign in
         </Link>
       </p>
-
+      
       <Tabs defaultValue="password" className="w-full">
         <TabsList className="grid w-full grid-cols-2 mb-6">
-          <TabsTrigger value="password">Password</TabsTrigger>
-          <TabsTrigger value="magic-link">Magic Link</TabsTrigger>
+          <TabsTrigger value="password" className="flex items-center gap-2">
+            <Key size={16} />
+            <span>Password</span>
+          </TabsTrigger>
+          <TabsTrigger value="magic-link" className="flex items-center gap-2">
+            <Mail size={16} />
+            <span>Magic Link</span>
+          </TabsTrigger>
         </TabsList>
-        
-        {/* Password Sign-Up */}
+
         <TabsContent value="password">
           <form className="flex flex-col w-full">
             <div className="flex flex-col gap-4">
@@ -60,13 +65,12 @@ export default async function Signup(props: {
                 formAction={signUpAction} 
                 pendingText="Signing up..."
               >
-                Sign up
+                Sign up with Password
               </SubmitButton>
             </div>
           </form>
         </TabsContent>
-        
-        {/* Magic Link Sign-Up */}
+
         <TabsContent value="magic-link">
           <form className="flex flex-col w-full">
             <div className="space-y-2 mb-2">
@@ -74,17 +78,14 @@ export default async function Signup(props: {
               <Input name="email" placeholder="you@example.com" required />
             </div>
             
-            <div className="text-sm text-muted-foreground mb-4">
-              We'll send a magic link to your email that will sign you up and sign you in instantly.
-              <br />
-              <span className="text-xs text-indigo-400 mt-1 block">
-                No password needed! You can always set one later.
-              </span>
-            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              We'll send a magic link to your email that will sign you up instantly.
+              No password needed!
+            </p>
             
             <SubmitButton 
-              className="mt-2 w-full" 
-              pendingText="Sending Link..." 
+              className="w-full" 
+              pendingText="Sending Magic Link..." 
               formAction={signInWithMagicLinkAction}
             >
               Send Magic Link
@@ -93,7 +94,9 @@ export default async function Signup(props: {
         </TabsContent>
       </Tabs>
       
-      <FormMessage message={searchParams} />
+      <div className="mt-4">
+        <FormMessage message={searchParams} />
+      </div>
     </div>
   );
 }
